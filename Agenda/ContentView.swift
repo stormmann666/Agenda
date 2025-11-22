@@ -41,6 +41,9 @@ struct DayTimelineView: View {
     @State private var isClearingAllTasks = false
     @State private var moveModeTaskID: UUID?
     @State private var selectedTaskID: UUID?
+    @State private var liveModeEnabled = false
+    @State private var liveTime = Date()
+    private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -64,6 +67,11 @@ struct DayTimelineView: View {
                 }
                 .onAppear {
                     proxy.scrollTo(currentAnchorIndex, anchor: .top)
+                }
+            }
+            .onReceive(liveTimer) { date in
+                if liveModeEnabled {
+                    liveTime = date
                 }
             }
             .navigationTitle("Agenda diaria")
@@ -119,7 +127,16 @@ struct DayTimelineView: View {
                 Button("Cancelar", role: .cancel) { }
             }
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button {
+                        liveModeEnabled.toggle()
+                        if liveModeEnabled {
+                            liveTime = Date()
+                        }
+                    } label: {
+                        Image(systemName: liveModeEnabled ? "pause.circle" : "play.circle")
+                    }
+
                     Button {
                         isClearingAllTasks = true
                     } label: {
@@ -150,6 +167,7 @@ struct DayTimelineView: View {
             let isMoveMode = moveModeTaskID == task.id
             let isSelected = selectedTaskID == task.id
             let isCompleted = task.isCompleted
+            let liveStatus = liveModeEnabled ? liveStatusInfo(for: task) : nil
 
             HStack(spacing: 8) {
                 ZStack(alignment: .topTrailing) {
@@ -161,7 +179,8 @@ struct DayTimelineView: View {
                                  isResizing: resizingTaskID == task.id,
                                  isMoveModeActive: isMoveMode,
                                  isSelected: isSelected,
-                                 isCompleted: isCompleted)
+                                 isCompleted: isCompleted,
+                                 liveStatus: liveStatus)
                         .contentShape(Rectangle())
                         .simultaneousGesture(resizeGesture(for: task))
                         .onTapGesture {
@@ -260,6 +279,18 @@ struct DayTimelineView: View {
         resetDragState()
     }
 
+    private func liveStatusInfo(for task: TaskItem) -> LiveStatusInfo? {
+        let startDate = viewModel.date(for: task.startIndex)
+        let endDate = viewModel.date(for: task.startIndex + task.duration)
+        guard liveTime >= startDate, liveTime < endDate else { return nil }
+        let total = endDate.timeIntervalSince(startDate)
+        guard total > 0 else { return nil }
+        let remaining = endDate.timeIntervalSince(liveTime)
+        let fraction = max(0, min(1, remaining / total))
+        let minutes = max(0, Int(ceil(remaining / 60)))
+        return LiveStatusInfo(remainingMinutes: minutes, fraction: fraction)
+    }
+
     private func resizeGesture(for task: TaskItem) -> some Gesture {
         LongPressGesture(minimumDuration: 0.35)
             .sequenced(before: DragGesture())
@@ -307,6 +338,7 @@ struct TaskCardView: View {
     let isMoveModeActive: Bool
     let isSelected: Bool
     let isCompleted: Bool
+    let liveStatus: LiveStatusInfo?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -340,6 +372,11 @@ struct TaskCardView: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            if let liveStatus {
+                LiveStatusBar(status: liveStatus)
+            }
+        }
         .offset(y: isDragging ? dragOffset : 0)
         .shadow(color: isMoveModeActive ? Color.blue.opacity(0.3) : .clear, radius: isMoveModeActive ? 6 : 0)
         .opacity(isCompleted ? 0.7 : 1)
@@ -378,6 +415,50 @@ struct MoveHandleView: View {
                         onEnded(value.translation.height)
                     }
             )
+    }
+}
+
+struct LiveStatusInfo {
+    let remainingMinutes: Int
+    let fraction: Double
+}
+
+struct LiveStatusBar: View {
+    let status: LiveStatusInfo
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
+                VStack(spacing: 6) {
+                    Text("\(status.remainingMinutes) min restantes")
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.primary)
+
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.15))
+                        Capsule()
+                            .fill(Color.blue)
+                            .frame(width: max(0, geometry.size.width * 0.8 * statusFraction))
+                    }
+                    .frame(height: 6)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: min(geometry.size.width * 0.8, 240))
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(radius: 4)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var statusFraction: CGFloat {
+        CGFloat(max(0, min(1, status.fraction)))
     }
 }
 
