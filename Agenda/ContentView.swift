@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var viewModel = ScheduleViewModel()
@@ -28,6 +29,9 @@ struct DayTimelineView: View {
     @ObservedObject var viewModel: ScheduleViewModel
 
     private let blockHeight: CGFloat = 56
+    private let swipeActivationDistance: CGFloat = 14
+    private let swipeDeleteDistance: CGFloat = 90
+    private let swipeMaxOffset: CGFloat = 150
     @State private var selectedBlockIndex: Int?
     @State private var showCategoryPicker = false
     @State private var editingTask: TaskItem?
@@ -37,6 +41,8 @@ struct DayTimelineView: View {
     @State private var resizingTaskID: UUID?
     @State private var resizingPreviewDuration: Int = 1
     @State private var scheduleError: String?
+    @State private var swipeTaskID: UUID?
+    @State private var swipeOffset: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -123,23 +129,42 @@ struct DayTimelineView: View {
             let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
             let startDate = block.startDate
             let endDate = viewModel.date(for: block.index + displayDuration)
-            TaskCardView(category: category,
-                         durationUnits: displayDuration,
-                         startDate: startDate,
-                         endDate: endDate,
-                         height: blockHeight * CGFloat(displayDuration),
-                         dragOffset: draggingTaskID == task.id ? dragOffset : 0,
-                         isDragging: draggingTaskID == task.id) {
-                taskPendingDeletion = task
+            let isDragging = draggingTaskID == task.id
+            let isSwiping = swipeTaskID == task.id
+            let taskHeight = blockHeight * CGFloat(displayDuration)
+            ZStack(alignment: .leading) {
+                if isSwiping && swipeOffset > 0 {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.red.opacity(0.15))
+                        .frame(height: taskHeight)
+                        .overlay(alignment: .leading) {
+                            Label("Eliminar", systemImage: "trash")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(.horizontal)
+                        }
+                }
+
+                TaskCardView(category: category,
+                             durationUnits: displayDuration,
+                             startDate: startDate,
+                             endDate: endDate,
+                             height: taskHeight,
+                             dragOffset: isDragging ? dragOffset : 0,
+                             horizontalOffset: isSwiping ? swipeOffset : 0,
+                             isDragging: isDragging,
+                             isResizing: resizingTaskID == task.id)
             }
-            .gesture(dragGesture(for: task))
-            .simultaneousGesture(TapGesture(count: 2).onEnded {
+            .highPriorityGesture(resizeGesture(for: task))
+            .simultaneousGesture(swipeToDeleteGesture(for: task))
+            .highPriorityGesture(TapGesture(count: 3).onEnded {
                 editingTask = task
             })
-            .overlay(alignment: .bottom) {
-                ResizeHandle(color: category.color)
-                    .gesture(resizeGesture(for: task))
-            }
+            .overlay(
+                DoubleTapDragCapture(isEnabled: resizingTaskID == nil && swipeTaskID == nil) { state, offset in
+                    handleDoubleTapDrag(state: state, offset: offset, for: task)
+                }
+            )
         } else {
             EmptySlot(height: height)
                 .onTapGesture {
@@ -156,35 +181,101 @@ struct DayTimelineView: View {
         selectedBlockIndex = nil
     }
 
-    private func dragGesture(for task: TaskItem) -> some Gesture {
-        DragGesture()
-            .onChanged { value in
-                draggingTaskID = task.id
-                dragOffset = value.translation.height
+    private func handleDoubleTapDrag(state: DoubleTapDragCapture.State, offset: CGFloat, for task: TaskItem) {
+        guard resizingTaskID == nil,
+              swipeTaskID == nil else {
+            resetDragState()
+            return
+        }
+        switch state {
+        case .began, .changed:
+            draggingTaskID = task.id
+            dragOffset = offset
+        case .ended:
+            guard draggingTaskID == task.id else {
+                resetDragState()
+                return
             }
-            .onEnded { value in
-                draggingTaskID = nil
-                let delta = Int(round(value.translation.height / blockHeight))
-                viewModel.move(task: task, by: delta)
-                dragOffset = 0
-            }
+            let delta = Int(round(offset / blockHeight))
+            viewModel.move(task: task, by: delta)
+            resetDragState()
+        case .cancelled:
+            resetDragState()
+        }
+    }
+
+    private func resetDragState() {
+        draggingTaskID = nil
+        dragOffset = 0
     }
 
     private func resizeGesture(for task: TaskItem) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        LongPressGesture(minimumDuration: 0.35)
+            .sequenced(before: DragGesture())
             .onChanged { value in
-                resizingTaskID = task.id
-                let delta = Int(round(value.translation.height / blockHeight))
-                let maxDuration = viewModel.totalBlocks - task.startIndex
-                resizingPreviewDuration = min(maxDuration, max(1, task.duration + delta))
+                switch value {
+                case let .first(success):
+                    guard success else { return }
+                    resizingTaskID = task.id
+                    resizingPreviewDuration = task.duration
+                case let .second(success, drag):
+                    guard success else { return }
+                    guard let translation = drag?.translation else { return }
+                    resizingTaskID = task.id
+                    let delta = Int(round(translation.height / blockHeight))
+                    let maxDuration = viewModel.totalBlocks - task.startIndex
+                    resizingPreviewDuration = min(maxDuration, max(1, task.duration + delta))
+                default:
+                    break
+                }
             }
             .onEnded { value in
-                let delta = Int(round(value.translation.height / blockHeight))
-                let maxDuration = viewModel.totalBlocks - task.startIndex
-                let newDuration = min(maxDuration, max(1, task.duration + delta))
-                viewModel.resize(task: task, newDuration: newDuration)
+                if case let .second(success, drag) = value,
+                   success,
+                   let translation = drag?.translation {
+                    let delta = Int(round(translation.height / blockHeight))
+                    let maxDuration = viewModel.totalBlocks - task.startIndex
+                    let newDuration = min(maxDuration, max(1, task.duration + delta))
+                    viewModel.resize(task: task, newDuration: newDuration)
+                }
                 resizingTaskID = nil
                 resizingPreviewDuration = 1
+            }
+    }
+
+    private func swipeToDeleteGesture(for task: TaskItem) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard resizingTaskID == nil else { return }
+                guard draggingTaskID == nil else { return }
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                if swipeTaskID != task.id {
+                    guard horizontal > 0,
+                          abs(horizontal) > abs(vertical),
+                          horizontal > swipeActivationDistance else { return }
+                    swipeTaskID = task.id
+                }
+                guard swipeTaskID == task.id else { return }
+                if horizontal <= 0 {
+                    withAnimation(.spring()) {
+                        swipeTaskID = nil
+                        swipeOffset = 0
+                    }
+                    return
+                }
+                swipeOffset = min(swipeMaxOffset, max(0, horizontal))
+            }
+            .onEnded { value in
+                guard swipeTaskID == task.id else { return }
+                let horizontal = max(value.translation.width, swipeOffset)
+                if horizontal > swipeDeleteDistance {
+                    taskPendingDeletion = task
+                }
+                withAnimation(.spring()) {
+                    swipeTaskID = nil
+                    swipeOffset = 0
+                }
             }
     }
 }
@@ -196,8 +287,9 @@ struct TaskCardView: View {
     let endDate: Date
     let height: CGFloat
     let dragOffset: CGFloat
+    let horizontalOffset: CGFloat
     let isDragging: Bool
-    var onDelete: () -> Void
+    let isResizing: Bool
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -220,12 +312,14 @@ struct TaskCardView: View {
 
             Spacer()
 
-            HStack {
-                Image(systemName: "arrow.up.and.down")
-                Text("Arrastra para mover")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pulsa tres veces para cambiar el tipo.")
                     .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("Haz doble toque y arrastra para moverlo. Mantén pulsado un poco más para ajustar duración. Desliza a la derecha para borrar.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
-            .foregroundColor(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,11 +328,92 @@ struct TaskCardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(category.color, lineWidth: 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(style: StrokeStyle(lineWidth: isResizing ? 2 : 0, dash: [6]))
+                        .foregroundColor(category.color.opacity(isResizing ? 0.8 : 0))
+                )
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .offset(y: isDragging ? dragOffset : 0)
-        .onLongPressGesture {
-            onDelete()
+        .offset(x: horizontalOffset, y: isDragging ? dragOffset : 0)
+    }
+}
+
+struct DoubleTapDragCapture: UIViewRepresentable {
+    enum State {
+        case began
+        case changed
+        case ended
+        case cancelled
+    }
+
+    var isEnabled: Bool
+    var handler: (State, CGFloat) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(handler: handler)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.isEnabled = isEnabled
+        context.coordinator.handler = handler
+    }
+
+    final class Coordinator: NSObject {
+        var handler: (State, CGFloat) -> Void
+        var isEnabled: Bool = true
+        private weak var view: UIView?
+        private var startLocation: CGPoint?
+
+        init(handler: @escaping (State, CGFloat) -> Void) {
+            self.handler = handler
+        }
+
+        func attach(to view: UIView) {
+            self.view = view
+            let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleGesture(_:)))
+            gesture.minimumPressDuration = 0.05
+            gesture.numberOfTapsRequired = 2
+            gesture.allowableMovement = .greatestFiniteMagnitude
+            gesture.cancelsTouchesInView = false
+            view.addGestureRecognizer(gesture)
+        }
+
+        @objc private func handleGesture(_ gesture: UILongPressGestureRecognizer) {
+            guard isEnabled, let view else {
+                handler(.cancelled, 0)
+                startLocation = nil
+                return
+            }
+
+            let current = gesture.location(in: view)
+
+            switch gesture.state {
+            case .began:
+                startLocation = current
+                handler(.began, 0)
+            case .changed:
+                guard let start = startLocation else { return }
+                handler(.changed, current.y - start.y)
+            case .ended:
+                if let start = startLocation {
+                    handler(.ended, current.y - start.y)
+                }
+                startLocation = nil
+            case .cancelled, .failed:
+                startLocation = nil
+                handler(.cancelled, 0)
+            default:
+                break
+            }
         }
     }
 }
@@ -258,18 +433,6 @@ struct EmptySlot: View {
                     .allowsHitTesting(false)
             )
             .contentShape(Rectangle())
-    }
-}
-
-struct ResizeHandle: View {
-    let color: Color
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 3)
-            .fill(color)
-            .frame(height: 8)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 6)
     }
 }
 

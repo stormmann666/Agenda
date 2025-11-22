@@ -56,10 +56,15 @@ final class ScheduleViewModel: ObservableObject {
     let dayEnd: Date
 
     private let wakeUpKey = "agenda.wakeUpAnchor"
+    private let tasksKey = "agenda.tasks.storage"
+    private let categoriesKey = "agenda.categories.storage"
     private let calendar = Calendar.current
     private let defaults = UserDefaults.standard
 
     init() {
+        categories = []
+        tasks = []
+
         let now = Date()
         let stored = defaults.object(forKey: wakeUpKey) as? Date
         if let stored, calendar.isDate(stored, inSameDayAs: now) {
@@ -73,8 +78,8 @@ final class ScheduleViewModel: ObservableObject {
         let midnight = calendar.startOfDay(for: now)
         dayEnd = calendar.date(byAdding: .day, value: 1, to: midnight) ?? midnight.addingTimeInterval(24 * 60 * 60)
 
-        categories = Self.defaultCategories
-        tasks = []
+        categories = loadCategories()
+        tasks = loadTasks()
     }
 
     var totalBlocks: Int {
@@ -206,12 +211,53 @@ final class ScheduleViewModel: ObservableObject {
         var updated = tasks
         transform(&updated)
         tasks = updated
+        saveTasks()
     }
 
     private func mutateCategories(_ transform: (inout [TaskCategory]) -> Void) {
         var updated = categories
         transform(&updated)
         categories = updated
+        saveCategories()
+    }
+
+    private func loadCategories() -> [TaskCategory] {
+        guard
+            let data = defaults.data(forKey: categoriesKey),
+            let decoded = try? JSONDecoder().decode([TaskCategory].self, from: data)
+        else {
+            return Self.defaultCategories
+        }
+        return decoded.isEmpty ? Self.defaultCategories : decoded
+    }
+
+    private func loadTasks() -> [TaskItem] {
+        guard
+            let data = defaults.data(forKey: tasksKey),
+            var decoded = try? JSONDecoder().decode([TaskItem].self, from: data)
+        else {
+            return []
+        }
+        decoded = decoded.filter { $0.duration > 0 }
+        decoded = decoded.map { task in
+            var mutable = task
+            if mutable.startIndex + mutable.duration > totalBlocks {
+                mutable.startIndex = max(0, totalBlocks - mutable.duration)
+            }
+            return mutable
+        }
+        decoded.sort { $0.startIndex < $1.startIndex }
+        return decoded
+    }
+
+    private func saveTasks() {
+        guard let data = try? JSONEncoder().encode(tasks) else { return }
+        defaults.set(data, forKey: tasksKey)
+    }
+
+    private func saveCategories() {
+        guard let data = try? JSONEncoder().encode(categories) else { return }
+        defaults.set(data, forKey: categoriesKey)
     }
 
     private static let defaultCategories: [TaskCategory] = [
