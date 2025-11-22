@@ -61,8 +61,6 @@ struct DayTimelineView: View {
                     }
                     .padding(.horizontal)
                 }
-                .simultaneousGesture(moveScrollGuardGesture)
-                .scrollDisabled(moveModeTaskID != nil || resizingTaskID != nil || draggingTaskID != nil)
                 .onAppear {
                     proxy.scrollTo(currentAnchorIndex, anchor: .top)
                 }
