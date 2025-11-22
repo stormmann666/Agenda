@@ -353,9 +353,16 @@ struct TaskCardView: View {
                 Spacer()
             }
 
-            Text("Duración: \(durationMinutes) min")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                Text("Duración: \(durationMinutes) min")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let liveStatus {
+                    Text("· Restan \(liveStatus.remainingMinutes) min")
+                        .font(.caption)
+                        .foregroundColor(.yellow)
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
