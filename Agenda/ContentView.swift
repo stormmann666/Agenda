@@ -119,8 +119,10 @@ struct DayTimelineView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Borrar todo") {
+                    Button {
                         isClearingAllTasks = true
+                    } label: {
+                        Image(systemName: "trash")
                     }
                     .disabled(viewModel.tasks.isEmpty)
                 }
