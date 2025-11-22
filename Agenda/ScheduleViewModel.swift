@@ -29,12 +29,14 @@ struct TaskItem: Identifiable, Codable, Hashable {
     var categoryID: UUID
     var startIndex: Int
     var duration: Int
+    var isCompleted: Bool
 
-    init(id: UUID = UUID(), categoryID: UUID, startIndex: Int, duration: Int) {
+    init(id: UUID = UUID(), categoryID: UUID, startIndex: Int, duration: Int, isCompleted: Bool = false) {
         self.id = id
         self.categoryID = categoryID
         self.startIndex = startIndex
         self.duration = duration
+        self.isCompleted = isCompleted
     }
 }
 
@@ -172,6 +174,12 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func toggleCompletion(for task: TaskItem) {
+        update(taskID: task.id) { mutable in
+            mutable.isCompleted.toggle()
+        }
+    }
+
     func delete(task: TaskItem) {
         mutateTasks { tasks in
             tasks.removeAll { $0.id == task.id }
@@ -188,6 +196,14 @@ final class ScheduleViewModel: ObservableObject {
     func addCategory() {
         let color = Color.randomAccent().hexString
         let newCategory = TaskCategory(name: "Nueva tarea", colorHex: color)
+        mutateCategories { categories in
+            categories.append(newCategory)
+        }
+    }
+
+    func addCategory(name: String, color: Color) {
+        let newCategory = TaskCategory(name: name.isEmpty ? "Nueva tarea" : name,
+                                       colorHex: color.hexString)
         mutateCategories { categories in
             categories.append(newCategory)
         }

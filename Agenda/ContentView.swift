@@ -142,25 +142,22 @@ struct DayTimelineView: View {
         let height = blockHeight * CGFloat(block.span)
         if let task = block.task, let category = viewModel.category(for: task.categoryID) {
             let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
-            let startDate = block.startDate
-            let endDate = viewModel.date(for: block.index + displayDuration)
             let taskHeight = blockHeight * CGFloat(displayDuration)
             let isDragging = draggingTaskID == task.id
             let isMoveMode = moveModeTaskID == task.id
             let isSelected = selectedTaskID == task.id
+            let isCompleted = task.isCompleted
 
             HStack(spacing: 8) {
                 ZStack(alignment: .topTrailing) {
                     TaskCardView(category: category,
-                                 durationUnits: displayDuration,
-                                 startDate: startDate,
-                                 endDate: endDate,
                                  height: taskHeight,
                                  dragOffset: isDragging ? dragOffset : 0,
                                  isDragging: isDragging,
                                  isResizing: resizingTaskID == task.id,
                                  isMoveModeActive: isMoveMode,
-                                 isSelected: isSelected)
+                                 isSelected: isSelected,
+                                 isCompleted: isCompleted)
                         .contentShape(Rectangle())
                         .simultaneousGesture(resizeGesture(for: task))
                         .onTapGesture {
@@ -171,16 +168,28 @@ struct DayTimelineView: View {
                             selectedTaskID = task.id
                         }
 
-                    Button {
-                        taskPendingDeletion = task
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .padding(8)
-                            .background(Color.red.opacity(0.18))
-                            .clipShape(Circle())
+                    HStack(spacing: 6) {
+                        Button {
+                            viewModel.toggleCompletion(for: task)
+                        } label: {
+                            Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(.headline)
+                                .foregroundColor(task.isCompleted ? .green : .gray)
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            taskPendingDeletion = task
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                                .padding(8)
+                                .background(Color.red.opacity(0.18))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(8)
                 }
 
@@ -286,48 +295,24 @@ struct DayTimelineView: View {
 
 struct TaskCardView: View {
     let category: TaskCategory
-    let durationUnits: Int
-    let startDate: Date
-    let endDate: Date
     let height: CGFloat
     let dragOffset: CGFloat
     let isDragging: Bool
     let isResizing: Bool
     let isMoveModeActive: Bool
     let isSelected: Bool
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
+    let isCompleted: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 12) {
+            Circle()
+                .fill(category.color)
+                .frame(width: 18, height: 18)
             Text(category.name)
                 .font(.headline)
-                .foregroundColor(category.color)
-
-            Text("\(Self.timeFormatter.string(from: startDate)) - \(Self.timeFormatter.string(from: endDate))")
-                .font(.subheadline)
-
-            Text("Duración: \(durationUnits * ScheduleViewModel.blockMinutes) min")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
+                .foregroundColor(isCompleted ? .secondary : category.color)
+                .strikethrough(isCompleted, color: category.color)
             Spacer()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Toca una vez para seleccionarlo.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Text("Pulsa dos veces para cambiar el tipo.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Text("Pulsa el botón azul y arrastra para moverlo. Mantén pulsado un poco más para ajustar duración. Usa el icono de papelera para borrar.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -346,6 +331,7 @@ struct TaskCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .offset(y: isDragging ? dragOffset : 0)
         .shadow(color: isMoveModeActive ? Color.blue.opacity(0.3) : .clear, radius: isMoveModeActive ? 6 : 0)
+        .opacity(isCompleted ? 0.7 : 1)
     }
 }
 
@@ -461,23 +447,29 @@ struct CategoryPickerSheet: View {
 
 struct CategoryManagerView: View {
     @ObservedObject var viewModel: ScheduleViewModel
+    @State private var showingAddCategory = false
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach($viewModel.categories) { $category in
-                    VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
                         TextField("Nombre", text: $category.name)
                             .font(.headline)
-
-                        ColorPicker("Color", selection: Binding<Color>(
-                            get: { Color(hex: category.colorHex) },
-                            set: { newColor in
-                                category.colorHex = newColor.hexString
-                            }
-                        ))
+                        Spacer()
+                        ColorPicker("",
+                                    selection: Binding<Color>(
+                                        get: { Color(hex: category.colorHex) },
+                                        set: { newColor in
+                                            category.colorHex = newColor.hexString
+                                        })
+                        )
+                        .labelsHidden()
+                        .frame(width: 34, height: 34)
+                        .clipShape(Circle())
                     }
-                    .padding(.vertical, 4)
+
+                    .padding(.vertical, 6)
                 }
                 .onDelete { indexSet in
                     for index in indexSet {
@@ -490,11 +482,16 @@ struct CategoryManagerView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        viewModel.addCategory()
+                        showingAddCategory = true
                     } label: {
                         Label("Añadir", systemImage: "plus")
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showingAddCategory) {
+            AddCategorySheet { name, color in
+                viewModel.addCategory(name: name, color: color)
             }
         }
     }
@@ -502,4 +499,38 @@ struct CategoryManagerView: View {
 
 #Preview {
     ContentView()
+}
+
+struct AddCategorySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var color: Color = Color.randomAccent()
+    var onSave: (String, Color) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Nombre") {
+                    TextField("Nombre de la tarea", text: $name)
+                }
+                Section("Color") {
+                    ColorPicker("Selecciona un color", selection: $color, supportsOpacity: false)
+                }
+            }
+            .navigationTitle("Nueva tarea")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar") {
+                        onSave(name.isEmpty ? "Nueva tarea" : name, color)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
 }
