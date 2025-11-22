@@ -32,11 +32,14 @@ struct DayTimelineView: View {
     @State private var showCategoryPicker = false
     @State private var editingTask: TaskItem?
     @State private var taskPendingDeletion: TaskItem?
+    @State private var draggingTaskID: UUID?
+    @State private var dragOffset: CGFloat = 0
     @State private var resizingTaskID: UUID?
     @State private var resizingPreviewDuration: Int = 1
     @State private var scheduleError: String?
-    @State private var taskBeingMoved: TaskItem?
     @State private var isClearingAllTasks = false
+    @State private var moveModeTaskID: UUID?
+    @State private var selectedTaskID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -58,6 +61,8 @@ struct DayTimelineView: View {
                     }
                     .padding(.horizontal)
                 }
+                .simultaneousGesture(moveScrollGuardGesture)
+                .scrollDisabled(moveModeTaskID != nil || resizingTaskID != nil || draggingTaskID != nil)
                 .onAppear {
                     proxy.scrollTo(currentAnchorIndex, anchor: .top)
                 }
@@ -96,6 +101,9 @@ struct DayTimelineView: View {
                     Button("Eliminar", role: .destructive) {
                         viewModel.delete(task: task)
                         taskPendingDeletion = nil
+                        if selectedTaskID == task.id {
+                            selectedTaskID = nil
+                        }
                     }
                 }
                 Button("Cancelar", role: .cancel) {
@@ -104,23 +112,15 @@ struct DayTimelineView: View {
             } message: {
                 Text("¿Quieres borrar esta tarea?")
             }
-            .sheet(item: $taskBeingMoved) { task in
-                MoveTaskSheet(task: task,
-                              options: viewModel.availableStartIndices(for: task),
-                              labelProvider: viewModel.label(for:),
-                              onConfirm: { index in
-                                  viewModel.move(task: task, to: index)
-                                  taskBeingMoved = nil
-                              })
-            }
             .alert("¿Borrar todas las tareas?", isPresented: $isClearingAllTasks) {
                 Button("Eliminar todas", role: .destructive) {
                     viewModel.clearAllTasks()
+                    selectedTaskID = nil
                 }
                 Button("Cancelar", role: .cancel) { }
             }
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Borrar todo") {
                         isClearingAllTasks = true
                     }
@@ -147,45 +147,56 @@ struct DayTimelineView: View {
             let startDate = block.startDate
             let endDate = viewModel.date(for: block.index + displayDuration)
             let taskHeight = blockHeight * CGFloat(displayDuration)
-            HStack(spacing: 10) {
-                Button {
-                    taskBeingMoved = task
-                } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.title3)
-                        Text("Mover")
-                            .font(.caption2)
-                    }
-                    .frame(width: 68, height: taskHeight)
-                    .background(Color.blue.opacity(0.15))
-                    .foregroundColor(.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
+            let isDragging = draggingTaskID == task.id
+            let isMoveMode = moveModeTaskID == task.id
+            let isSelected = selectedTaskID == task.id
 
-                TaskCardView(category: category,
-                             durationUnits: displayDuration,
-                             startDate: startDate,
-                             endDate: endDate,
-                             height: taskHeight,
-                             isResizing: resizingTaskID == task.id)
-                .overlay(alignment: .topTrailing) {
+            HStack(spacing: 8) {
+                ZStack(alignment: .topTrailing) {
+                    TaskCardView(category: category,
+                                 durationUnits: displayDuration,
+                                 startDate: startDate,
+                                 endDate: endDate,
+                                 height: taskHeight,
+                                 dragOffset: isDragging ? dragOffset : 0,
+                                 isDragging: isDragging,
+                                 isResizing: resizingTaskID == task.id,
+                                 isMoveModeActive: isMoveMode,
+                                 isSelected: isSelected)
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(resizeGesture(for: task))
+                        .onTapGesture {
+                            selectedTaskID = task.id
+                        }
+                        .onTapGesture(count: 2) {
+                            editingTask = task
+                            selectedTaskID = task.id
+                        }
+
                     Button {
                         taskPendingDeletion = task
                     } label: {
                         Image(systemName: "trash")
+                            .font(.caption)
                             .padding(8)
-                            .background(Color.red.opacity(0.15))
+                            .background(Color.red.opacity(0.18))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .padding(8)
                 }
-                .highPriorityGesture(resizeGesture(for: task))
-                .highPriorityGesture(TapGesture(count: 3).onEnded {
-                    editingTask = task
-                })
+
+                MoveHandleView(height: taskHeight,
+                               isActive: isMoveMode,
+                               onStart: {
+                                   beginMove(for: task)
+                               },
+                               onChanged: { offset in
+                                   handleMoveDragChanged(for: task, offset: offset)
+                               },
+                               onEnded: { offset in
+                                   handleMoveDragEnded(for: task, offset: offset)
+                               })
             }
         } else {
             EmptySlot(height: height)
@@ -203,6 +214,41 @@ struct DayTimelineView: View {
         selectedBlockIndex = nil
     }
 
+    private func handleMoveDragChanged(for task: TaskItem, offset: CGFloat) {
+        guard moveModeTaskID == task.id else { return }
+        draggingTaskID = task.id
+        dragOffset = offset
+    }
+
+    private func handleMoveDragEnded(for task: TaskItem, offset: CGFloat) {
+        guard draggingTaskID == task.id else {
+            finishMove()
+            return
+        }
+        let delta = Int(round(offset / blockHeight))
+        finishMove()
+        guard delta != 0 else { return }
+        viewModel.move(task: task, by: delta)
+    }
+
+    private func resetDragState() {
+        draggingTaskID = nil
+        dragOffset = 0
+    }
+
+    private func beginMove(for task: TaskItem) {
+        if moveModeTaskID != task.id {
+            moveModeTaskID = task.id
+            resetDragState()
+        }
+        selectedTaskID = task.id
+    }
+
+    private func finishMove() {
+        moveModeTaskID = nil
+        resetDragState()
+    }
+
     private func resizeGesture(for task: TaskItem) -> some Gesture {
         LongPressGesture(minimumDuration: 0.35)
             .sequenced(before: DragGesture())
@@ -210,6 +256,7 @@ struct DayTimelineView: View {
                 switch value {
                 case let .first(success):
                     guard success else { return }
+                    finishMove()
                     resizingTaskID = task.id
                     resizingPreviewDuration = task.duration
                 case let .second(success, drag):
@@ -245,7 +292,11 @@ struct TaskCardView: View {
     let startDate: Date
     let endDate: Date
     let height: CGFloat
+    let dragOffset: CGFloat
+    let isDragging: Bool
     let isResizing: Bool
+    let isMoveModeActive: Bool
+    let isSelected: Bool
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -269,10 +320,13 @@ struct TaskCardView: View {
             Spacer()
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Pulsa tres veces para cambiar el tipo.")
+                Text("Toca una vez para seleccionarlo.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Text("Usa el botón azul de la izquierda para moverlo. Mantén pulsado un poco más para ajustar duración. Usa el icono de papelera para borrar.")
+                Text("Pulsa dos veces para cambiar el tipo.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("Pulsa el botón azul y arrastra para moverlo. Mantén pulsado un poco más para ajustar duración. Usa el icono de papelera para borrar.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -280,10 +334,11 @@ struct TaskCardView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: height)
-        .background(category.color.opacity(0.15))
+        .background(category.color.opacity(isSelected || isMoveModeActive ? 0.22 : 0.15))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(category.color, lineWidth: 2)
+                .stroke(isMoveModeActive ? Color.blue : (isSelected ? category.color.opacity(0.9) : category.color),
+                        lineWidth: isMoveModeActive || isSelected ? 3 : 2)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(style: StrokeStyle(lineWidth: isResizing ? 2 : 0, dash: [6]))
@@ -291,64 +346,45 @@ struct TaskCardView: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .offset(y: isDragging ? dragOffset : 0)
+        .shadow(color: isMoveModeActive ? Color.blue.opacity(0.3) : .clear, radius: isMoveModeActive ? 6 : 0)
     }
 }
 
-struct MoveTaskSheet: View {
-    let task: TaskItem
-    let options: [Int]
-    let labelProvider: (Int) -> String
-    var onConfirm: (Int) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var selection: Int
-
-    private var sortedOptions: [Int] {
-        options.sorted()
-    }
-
-    init(task: TaskItem,
-         options: [Int],
-         labelProvider: @escaping (Int) -> String,
-         onConfirm: @escaping (Int) -> Void) {
-        self.task = task
-        self.options = options
-        self.labelProvider = labelProvider
-        self.onConfirm = onConfirm
-        _selection = State(initialValue: task.startIndex)
-    }
+struct MoveHandleView: View {
+    let height: CGFloat
+    let isActive: Bool
+    var onStart: () -> Void
+    var onChanged: (CGFloat) -> Void
+    var onEnded: (CGFloat) -> Void
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Nueva hora") {
-                    Picker("Inicio", selection: $selection) {
-                        ForEach(sortedOptions, id: \.self) { index in
-                            Text(labelProvider(index))
-                                .tag(index)
-                        }
-                    }
+        RoundedRectangle(cornerRadius: 12)
+            .fill(isActive ? Color.blue : Color.blue.opacity(0.6))
+            .frame(width: 48, height: height)
+            .frame(minHeight: 72)
+            .overlay(
+                VStack(spacing: 6) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Mover")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.9))
                 }
-            }
-            .navigationTitle("Mover tarea")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar") {
-                        onConfirm(selection)
-                        dismiss()
+            )
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        onStart()
+                        onChanged(value.translation.height)
                     }
-                    .disabled(!sortedOptions.contains(selection))
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") {
-                        dismiss()
+                    .onEnded { value in
+                        onEnded(value.translation.height)
                     }
-                }
-            }
-        }
+            )
     }
 }
-
 
 struct EmptySlot: View {
     let height: CGFloat
