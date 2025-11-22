@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
     @StateObject private var viewModel = ScheduleViewModel()
@@ -29,20 +28,15 @@ struct DayTimelineView: View {
     @ObservedObject var viewModel: ScheduleViewModel
 
     private let blockHeight: CGFloat = 56
-    private let swipeActivationDistance: CGFloat = 14
-    private let swipeDeleteDistance: CGFloat = 90
-    private let swipeMaxOffset: CGFloat = 150
     @State private var selectedBlockIndex: Int?
     @State private var showCategoryPicker = false
     @State private var editingTask: TaskItem?
     @State private var taskPendingDeletion: TaskItem?
-    @State private var draggingTaskID: UUID?
-    @State private var dragOffset: CGFloat = 0
     @State private var resizingTaskID: UUID?
     @State private var resizingPreviewDuration: Int = 1
     @State private var scheduleError: String?
-    @State private var swipeTaskID: UUID?
-    @State private var swipeOffset: CGFloat = 0
+    @State private var taskBeingMoved: TaskItem?
+    @State private var isClearingAllTasks = false
 
     var body: some View {
         NavigationStack {
@@ -110,6 +104,29 @@ struct DayTimelineView: View {
             } message: {
                 Text("¿Quieres borrar esta tarea?")
             }
+            .sheet(item: $taskBeingMoved) { task in
+                MoveTaskSheet(task: task,
+                              options: viewModel.availableStartIndices(for: task),
+                              labelProvider: viewModel.label(for:),
+                              onConfirm: { index in
+                                  viewModel.move(task: task, to: index)
+                                  taskBeingMoved = nil
+                              })
+            }
+            .alert("¿Borrar todas las tareas?", isPresented: $isClearingAllTasks) {
+                Button("Eliminar todas", role: .destructive) {
+                    viewModel.clearAllTasks()
+                }
+                Button("Cancelar", role: .cancel) { }
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Borrar todo") {
+                        isClearingAllTasks = true
+                    }
+                    .disabled(viewModel.tasks.isEmpty)
+                }
+            }
         }
     }
 
@@ -129,42 +146,47 @@ struct DayTimelineView: View {
             let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
             let startDate = block.startDate
             let endDate = viewModel.date(for: block.index + displayDuration)
-            let isDragging = draggingTaskID == task.id
-            let isSwiping = swipeTaskID == task.id
             let taskHeight = blockHeight * CGFloat(displayDuration)
-            ZStack(alignment: .leading) {
-                if isSwiping && swipeOffset > 0 {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.red.opacity(0.15))
-                        .frame(height: taskHeight)
-                        .overlay(alignment: .leading) {
-                            Label("Eliminar", systemImage: "trash")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                                .padding(.horizontal)
-                        }
+            HStack(spacing: 10) {
+                Button {
+                    taskBeingMoved = task
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.title3)
+                        Text("Mover")
+                            .font(.caption2)
+                    }
+                    .frame(width: 68, height: taskHeight)
+                    .background(Color.blue.opacity(0.15))
+                    .foregroundColor(.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .buttonStyle(.plain)
 
                 TaskCardView(category: category,
                              durationUnits: displayDuration,
                              startDate: startDate,
                              endDate: endDate,
                              height: taskHeight,
-                             dragOffset: isDragging ? dragOffset : 0,
-                             horizontalOffset: isSwiping ? swipeOffset : 0,
-                             isDragging: isDragging,
                              isResizing: resizingTaskID == task.id)
-            }
-            .highPriorityGesture(resizeGesture(for: task))
-            .simultaneousGesture(swipeToDeleteGesture(for: task))
-            .highPriorityGesture(TapGesture(count: 3).onEnded {
-                editingTask = task
-            })
-            .overlay(
-                DoubleTapDragCapture(isEnabled: resizingTaskID == nil && swipeTaskID == nil) { state, offset in
-                    handleDoubleTapDrag(state: state, offset: offset, for: task)
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        taskPendingDeletion = task
+                    } label: {
+                        Image(systemName: "trash")
+                            .padding(8)
+                            .background(Color.red.opacity(0.15))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
                 }
-            )
+                .highPriorityGesture(resizeGesture(for: task))
+                .highPriorityGesture(TapGesture(count: 3).onEnded {
+                    editingTask = task
+                })
+            }
         } else {
             EmptySlot(height: height)
                 .onTapGesture {
@@ -179,34 +201,6 @@ struct DayTimelineView: View {
             scheduleError = "Ese espacio ya está ocupado."
         }
         selectedBlockIndex = nil
-    }
-
-    private func handleDoubleTapDrag(state: DoubleTapDragCapture.State, offset: CGFloat, for task: TaskItem) {
-        guard resizingTaskID == nil,
-              swipeTaskID == nil else {
-            resetDragState()
-            return
-        }
-        switch state {
-        case .began, .changed:
-            draggingTaskID = task.id
-            dragOffset = offset
-        case .ended:
-            guard draggingTaskID == task.id else {
-                resetDragState()
-                return
-            }
-            let delta = Int(round(offset / blockHeight))
-            viewModel.move(task: task, by: delta)
-            resetDragState()
-        case .cancelled:
-            resetDragState()
-        }
-    }
-
-    private func resetDragState() {
-        draggingTaskID = nil
-        dragOffset = 0
     }
 
     private func resizeGesture(for task: TaskItem) -> some Gesture {
@@ -243,41 +237,6 @@ struct DayTimelineView: View {
             }
     }
 
-    private func swipeToDeleteGesture(for task: TaskItem) -> some Gesture {
-        DragGesture()
-            .onChanged { value in
-                guard resizingTaskID == nil else { return }
-                guard draggingTaskID == nil else { return }
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                if swipeTaskID != task.id {
-                    guard horizontal > 0,
-                          abs(horizontal) > abs(vertical),
-                          horizontal > swipeActivationDistance else { return }
-                    swipeTaskID = task.id
-                }
-                guard swipeTaskID == task.id else { return }
-                if horizontal <= 0 {
-                    withAnimation(.spring()) {
-                        swipeTaskID = nil
-                        swipeOffset = 0
-                    }
-                    return
-                }
-                swipeOffset = min(swipeMaxOffset, max(0, horizontal))
-            }
-            .onEnded { value in
-                guard swipeTaskID == task.id else { return }
-                let horizontal = max(value.translation.width, swipeOffset)
-                if horizontal > swipeDeleteDistance {
-                    taskPendingDeletion = task
-                }
-                withAnimation(.spring()) {
-                    swipeTaskID = nil
-                    swipeOffset = 0
-                }
-            }
-    }
 }
 
 struct TaskCardView: View {
@@ -286,9 +245,6 @@ struct TaskCardView: View {
     let startDate: Date
     let endDate: Date
     let height: CGFloat
-    let dragOffset: CGFloat
-    let horizontalOffset: CGFloat
-    let isDragging: Bool
     let isResizing: Bool
 
     private static let timeFormatter: DateFormatter = {
@@ -316,7 +272,7 @@ struct TaskCardView: View {
                 Text("Pulsa tres veces para cambiar el tipo.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Text("Haz doble toque y arrastra para moverlo. Mantén pulsado un poco más para ajustar duración. Desliza a la derecha para borrar.")
+                Text("Usa el botón azul de la izquierda para moverlo. Mantén pulsado un poco más para ajustar duración. Usa el icono de papelera para borrar.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -335,88 +291,64 @@ struct TaskCardView: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .offset(x: horizontalOffset, y: isDragging ? dragOffset : 0)
     }
 }
 
-struct DoubleTapDragCapture: UIViewRepresentable {
-    enum State {
-        case began
-        case changed
-        case ended
-        case cancelled
+struct MoveTaskSheet: View {
+    let task: TaskItem
+    let options: [Int]
+    let labelProvider: (Int) -> String
+    var onConfirm: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: Int
+
+    private var sortedOptions: [Int] {
+        options.sorted()
     }
 
-    var isEnabled: Bool
-    var handler: (State, CGFloat) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(handler: handler)
+    init(task: TaskItem,
+         options: [Int],
+         labelProvider: @escaping (Int) -> String,
+         onConfirm: @escaping (Int) -> Void) {
+        self.task = task
+        self.options = options
+        self.labelProvider = labelProvider
+        self.onConfirm = onConfirm
+        _selection = State(initialValue: task.startIndex)
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = true
-        context.coordinator.attach(to: view)
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.isEnabled = isEnabled
-        context.coordinator.handler = handler
-    }
-
-    final class Coordinator: NSObject {
-        var handler: (State, CGFloat) -> Void
-        var isEnabled: Bool = true
-        private weak var view: UIView?
-        private var startLocation: CGPoint?
-
-        init(handler: @escaping (State, CGFloat) -> Void) {
-            self.handler = handler
-        }
-
-        func attach(to view: UIView) {
-            self.view = view
-            let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleGesture(_:)))
-            gesture.minimumPressDuration = 0.05
-            gesture.numberOfTapsRequired = 2
-            gesture.allowableMovement = .greatestFiniteMagnitude
-            gesture.cancelsTouchesInView = false
-            view.addGestureRecognizer(gesture)
-        }
-
-        @objc private func handleGesture(_ gesture: UILongPressGestureRecognizer) {
-            guard isEnabled, let view else {
-                handler(.cancelled, 0)
-                startLocation = nil
-                return
-            }
-
-            let current = gesture.location(in: view)
-
-            switch gesture.state {
-            case .began:
-                startLocation = current
-                handler(.began, 0)
-            case .changed:
-                guard let start = startLocation else { return }
-                handler(.changed, current.y - start.y)
-            case .ended:
-                if let start = startLocation {
-                    handler(.ended, current.y - start.y)
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Nueva hora") {
+                    Picker("Inicio", selection: $selection) {
+                        ForEach(sortedOptions, id: \.self) { index in
+                            Text(labelProvider(index))
+                                .tag(index)
+                        }
+                    }
                 }
-                startLocation = nil
-            case .cancelled, .failed:
-                startLocation = nil
-                handler(.cancelled, 0)
-            default:
-                break
+            }
+            .navigationTitle("Mover tarea")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar") {
+                        onConfirm(selection)
+                        dismiss()
+                    }
+                    .disabled(!sortedOptions.contains(selection))
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") {
+                        dismiss()
+                    }
+                }
             }
         }
     }
 }
+
 
 struct EmptySlot: View {
     let height: CGFloat

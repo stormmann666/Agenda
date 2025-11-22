@@ -144,13 +144,11 @@ final class ScheduleViewModel: ObservableObject {
         return true
     }
 
-    func move(task: TaskItem, by delta: Int) {
-        guard delta != 0 else { return }
-        let newStart = max(0, min(totalBlocks - task.duration, task.startIndex + delta))
+    func move(task: TaskItem, to startIndex: Int) {
         update(taskID: task.id) { mutable in
-            if canPlace(start: newStart, duration: mutable.duration, ignoring: mutable.id) {
-                mutable.startIndex = newStart
-            }
+            let clamped = max(0, min(totalBlocks - mutable.duration, startIndex))
+            guard canPlace(start: clamped, duration: mutable.duration, ignoring: mutable.id) else { return }
+            mutable.startIndex = clamped
         }
     }
 
@@ -195,6 +193,20 @@ final class ScheduleViewModel: ObservableObject {
         }
         mutateTasks { tasks in
             tasks.removeAll { $0.categoryID == category.id }
+        }
+    }
+
+    func clearAllTasks() {
+        mutateTasks { tasks in
+            tasks.removeAll()
+        }
+    }
+
+    func availableStartIndices(for task: TaskItem) -> [Int] {
+        guard tasks.contains(where: { $0.id == task.id }) else { return [task.startIndex] }
+        let maxStart = max(0, totalBlocks - task.duration)
+        return (0...maxStart).filter { index in
+            canPlace(start: index, duration: task.duration, ignoring: task.id)
         }
     }
 
