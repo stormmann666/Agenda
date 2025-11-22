@@ -84,7 +84,11 @@ final class ScheduleViewModel: ObservableObject {
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
     private let dayLogsKey = "agenda.dayLogs.storage"
-    private let calendar = Calendar.current
+    private var calendar: Calendar = {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        return cal
+    }()
     private let defaults = UserDefaults.standard
 
     init() {
@@ -93,21 +97,19 @@ final class ScheduleViewModel: ObservableObject {
         dayLogs = []
 
         let now = Date()
+        let candidateStart = Self.dailyStart(for: now, calendar: calendar)
         let stored = defaults.object(forKey: wakeUpKey) as? Date
         var previousDayStart: Date?
-        if let stored, calendar.isDate(stored, inSameDayAs: now) {
+        if let stored, calendar.isDate(stored, inSameDayAs: candidateStart), stored == candidateStart {
             dayStart = stored
         } else {
-            if let stored {
-                previousDayStart = stored
-            }
-            let newStart = now.roundedDownToBlock(minutes: Self.blockMinutes, calendar: calendar)
-            dayStart = newStart
-            defaults.set(newStart, forKey: wakeUpKey)
+            previousDayStart = stored
+            dayStart = candidateStart
+            defaults.set(candidateStart, forKey: wakeUpKey)
         }
 
-        let midnight = calendar.startOfDay(for: now)
-        dayEnd = calendar.date(byAdding: .day, value: 1, to: midnight) ?? midnight.addingTimeInterval(24 * 60 * 60)
+        let nextMidnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+        dayEnd = nextMidnight
 
         categories = loadCategories()
         let loadedTasks = loadTasks()
@@ -387,6 +389,24 @@ private extension Date {
         updated.hour = newHour
         updated.minute = newMinute
         return calendar.date(from: updated) ?? self
+    }
+}
+
+extension ScheduleViewModel {
+    private static func dailyStart(for date: Date, calendar: Calendar) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day], from: date)
+        components.hour = 4
+        components.minute = 45
+        components.second = 0
+        components.nanosecond = 0
+        guard let anchor = calendar.date(from: components) else {
+            return date
+        }
+        if date >= anchor {
+            return anchor
+        } else {
+            return calendar.date(byAdding: .day, value: -1, to: anchor) ?? anchor
+        }
     }
 }
 

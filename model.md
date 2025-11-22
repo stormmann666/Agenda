@@ -28,6 +28,9 @@
 - **Creation**
   - On app launch we compare the last stored `wakeUpKey` with the current day. If the calendar day changed we archive the previous day’s tasks into a new `ScheduleDayLog` entry before clearing the schedule for the new day.
 
+## Daily time window
+- Each schedule “day” runs from **04:45** local time to **00:00** (midnight) of the following calendar day. The `wakeUpKey` stores the 04:45 anchor to detect day changes and ensure all 15‑minute blocks are generated within that window.
+
 ## Persistence Keys
 - `agenda.categories.storage` → `[TaskCategory]`
 - `agenda.tasks.storage` → `[TaskItem]` for the active day.
