@@ -152,6 +152,7 @@ struct DayTimelineView: View {
                 ZStack(alignment: .topTrailing) {
                     TaskCardView(category: category,
                                  height: taskHeight,
+                                 durationMinutes: displayDuration * ScheduleViewModel.blockMinutes,
                                  dragOffset: isDragging ? dragOffset : 0,
                                  isDragging: isDragging,
                                  isResizing: resizingTaskID == task.id,
@@ -296,6 +297,7 @@ struct DayTimelineView: View {
 struct TaskCardView: View {
     let category: TaskCategory
     let height: CGFloat
+    let durationMinutes: Int
     let dragOffset: CGFloat
     let isDragging: Bool
     let isResizing: Bool
@@ -304,15 +306,21 @@ struct TaskCardView: View {
     let isCompleted: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Circle()
-                .fill(category.color)
-                .frame(width: 18, height: 18)
-            Text(category.name)
-                .font(.headline)
-                .foregroundColor(isCompleted ? .secondary : category.color)
-                .strikethrough(isCompleted, color: category.color)
-            Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(category.color)
+                    .frame(width: 18, height: 18)
+                Text(category.name)
+                    .font(.headline)
+                    .foregroundColor(isCompleted ? .secondary : category.color)
+                    .strikethrough(isCompleted, color: category.color)
+                Spacer()
+            }
+
+            Text("Duración: \(durationMinutes) min")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -505,6 +513,7 @@ struct AddCategorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
     @State private var color: Color = Color.randomAccent()
+    @FocusState private var nameFieldFocused: Bool
     var onSave: (String, Color) -> Void
 
     var body: some View {
@@ -512,12 +521,20 @@ struct AddCategorySheet: View {
             Form {
                 Section("Nombre") {
                     TextField("Nombre de la tarea", text: $name)
+                        .focused($nameFieldFocused)
                 }
                 Section("Color") {
-                    ColorPicker("Selecciona un color", selection: $color, supportsOpacity: false)
+                    ColorGrid(selectedColor: $color)
+                    ColorPicker("Personalizar color", selection: $color, supportsOpacity: false)
+                        .font(.footnote)
                 }
             }
             .navigationTitle("Nueva tarea")
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    nameFieldFocused = true
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") {
@@ -532,5 +549,60 @@ struct AddCategorySheet: View {
                 }
             }
         }
+    }
+}
+
+struct ColorGrid: View {
+    @Binding var selectedColor: Color
+
+    private let colors: [Color] = [
+        .red, .orange, .yellow, .green, .mint, .teal, .blue, .indigo, .purple, .pink,
+        Color(red: 0.97, green: 0.58, blue: 0.12),
+        Color(red: 0.55, green: 0.27, blue: 0.07),
+        Color(red: 0.4, green: 0.71, blue: 0.54),
+        Color(red: 0.2, green: 0.29, blue: 0.37),
+        Color(red: 0.8, green: 0.12, blue: 0.35),
+        Color(red: 0.07, green: 0.62, blue: 0.69),
+        Color(red: 0.12, green: 0.12, blue: 0.26),
+        Color(red: 0.86, green: 0.23, blue: 0.18),
+        Color(red: 0.32, green: 0.42, blue: 0.68),
+        Color(red: 0.54, green: 0.67, blue: 0.82)
+    ]
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(colors.indices, id: \.self) { idx in
+                let color = colors[idx]
+                Circle()
+                    .fill(color)
+                    .frame(width: 34, height: 34)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: selectedColor.isApproximatelyEqual(to: color) ? 3 : 0)
+                    )
+                    .shadow(radius: selectedColor.isApproximatelyEqual(to: color) ? 3 : 0)
+                    .onTapGesture {
+                        selectedColor = color
+                    }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private extension Color {
+    func isApproximatelyEqual(to other: Color) -> Bool {
+        let lhs = UIColor(self)
+        let rhs = UIColor(other)
+        var lRed: CGFloat = 0, lGreen: CGFloat = 0, lBlue: CGFloat = 0, lAlpha: CGFloat = 0
+        var rRed: CGFloat = 0, rGreen: CGFloat = 0, rBlue: CGFloat = 0, rAlpha: CGFloat = 0
+        lhs.getRed(&lRed, green: &lGreen, blue: &lBlue, alpha: &lAlpha)
+        rhs.getRed(&rRed, green: &rGreen, blue: &rBlue, alpha: &rAlpha)
+        return abs(lRed - rRed) < 0.02 &&
+               abs(lGreen - rGreen) < 0.02 &&
+               abs(lBlue - rBlue) < 0.02 &&
+               abs(lAlpha - rAlpha) < 0.02
     }
 }
