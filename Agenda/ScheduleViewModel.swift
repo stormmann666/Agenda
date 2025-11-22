@@ -38,6 +38,28 @@ struct TaskItem: Identifiable, Codable, Hashable {
         self.duration = duration
         self.isCompleted = isCompleted
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id, categoryID, startIndex, duration, isCompleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        categoryID = try container.decode(UUID.self, forKey: .categoryID)
+        startIndex = try container.decode(Int.self, forKey: .startIndex)
+        duration = try container.decode(Int.self, forKey: .duration)
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(categoryID, forKey: .categoryID)
+        try container.encode(startIndex, forKey: .startIndex)
+        try container.encode(duration, forKey: .duration)
+        try container.encode(isCompleted, forKey: .isCompleted)
+    }
 }
 
 struct TimelineBlock: Identifiable {
@@ -53,6 +75,7 @@ final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 15
     @Published var categories: [TaskCategory]
     @Published var tasks: [TaskItem]
+    @Published var dayLogs: [ScheduleDayLog]
 
     let dayStart: Date
     let dayEnd: Date
@@ -60,18 +83,24 @@ final class ScheduleViewModel: ObservableObject {
     private let wakeUpKey = "agenda.wakeUpAnchor"
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
+    private let dayLogsKey = "agenda.dayLogs.storage"
     private let calendar = Calendar.current
     private let defaults = UserDefaults.standard
 
     init() {
         categories = []
         tasks = []
+        dayLogs = []
 
         let now = Date()
         let stored = defaults.object(forKey: wakeUpKey) as? Date
+        var previousDayStart: Date?
         if let stored, calendar.isDate(stored, inSameDayAs: now) {
             dayStart = stored
         } else {
+            if let stored {
+                previousDayStart = stored
+            }
             let newStart = now.roundedDownToBlock(minutes: Self.blockMinutes, calendar: calendar)
             dayStart = newStart
             defaults.set(newStart, forKey: wakeUpKey)
@@ -81,7 +110,16 @@ final class ScheduleViewModel: ObservableObject {
         dayEnd = calendar.date(byAdding: .day, value: 1, to: midnight) ?? midnight.addingTimeInterval(24 * 60 * 60)
 
         categories = loadCategories()
-        tasks = loadTasks()
+        let loadedTasks = loadTasks()
+        dayLogs = loadDayLogs()
+
+        if let previousDayStart {
+            archiveDay(date: previousDayStart, tasks: loadedTasks)
+            tasks = []
+            saveTasks()
+        } else {
+            tasks = loadedTasks
+        }
     }
 
     var totalBlocks: Int {
@@ -286,6 +324,32 @@ final class ScheduleViewModel: ObservableObject {
         defaults.set(data, forKey: categoriesKey)
     }
 
+    private func archiveDay(date: Date, tasks: [TaskItem]) {
+        let dayStart = calendar.startOfDay(for: date)
+        if dayLogs.contains(where: { calendar.isDate($0.date, inSameDayAs: dayStart) }) {
+            return
+        }
+        let log = ScheduleDayLog(date: dayStart, tasks: tasks)
+        dayLogs.append(log)
+        dayLogs.sort { $0.date > $1.date }
+        saveDayLogs()
+    }
+
+    private func loadDayLogs() -> [ScheduleDayLog] {
+        guard
+            let data = defaults.data(forKey: dayLogsKey),
+            let decoded = try? JSONDecoder().decode([ScheduleDayLog].self, from: data)
+        else {
+            return []
+        }
+        return decoded
+    }
+
+    private func saveDayLogs() {
+        guard let data = try? JSONEncoder().encode(dayLogs) else { return }
+        defaults.set(data, forKey: dayLogsKey)
+    }
+
     private static let defaultCategories: [TaskCategory] = [
         TaskCategory(name: "IA", colorHex: "#9874ff"),
         TaskCategory(name: "IA app", colorHex: "#2a9d8f"),
@@ -295,6 +359,18 @@ final class ScheduleViewModel: ObservableObject {
         TaskCategory(name: "FatherFondo", colorHex: "#118ab2"),
         TaskCategory(name: "Bolsa teoría", colorHex: "#8ecae6")
     ]
+}
+
+struct ScheduleDayLog: Identifiable, Codable {
+    let id: UUID
+    let date: Date
+    let tasks: [TaskItem]
+
+    init(id: UUID = UUID(), date: Date, tasks: [TaskItem]) {
+        self.id = id
+        self.date = date
+        self.tasks = tasks
+    }
 }
 
 private extension Date {
