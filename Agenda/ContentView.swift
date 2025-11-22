@@ -428,37 +428,38 @@ struct LiveStatusBar: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack {
-                Spacer()
-                VStack(spacing: 6) {
-                    Text("\(status.remainingMinutes) min restantes")
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(.primary)
-
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.primary.opacity(0.15))
-                        Capsule()
-                            .fill(Color.blue)
-                            .frame(width: max(0, geometry.size.width * 0.8 * statusFraction))
-                    }
-                    .frame(height: 6)
+            HStack(alignment: .center, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Capsule()
+                        .fill(Color.blue.opacity(0.25))
+                        .frame(width: statusTrackWidth(for: geometry.size.width),
+                               height: 4)
+                        .overlay(
+                            Capsule()
+                                .fill(Color.blue)
+                                .frame(width: statusTrackWidth(for: geometry.size.width) * statusFraction,
+                                       height: 4),
+                            alignment: .leading
+                        )
+                    Text("\(status.remainingMinutes) min")
+                        .font(.caption2)
+                        .foregroundColor(.blue)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(maxWidth: min(geometry.size.width * 0.8, 240))
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(radius: 4)
+                Spacer()
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
         }
         .allowsHitTesting(false)
     }
 
     private var statusFraction: CGFloat {
         CGFloat(max(0, min(1, status.fraction)))
+    }
+
+    private func statusTrackWidth(for width: CGFloat) -> CGFloat {
+        min(width * 0.6, 160)
     }
 }
 
