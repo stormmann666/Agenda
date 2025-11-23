@@ -38,3 +38,15 @@
 - `agenda.wakeUpAnchor` → `Date` used as the start of the currently active day.
 
 All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `UserDefaults.standard`.
+
+## Task mutations
+- **Placement rules**: `canPlace(start:duration:ignoring:)` blocks overlaps by ensuring the new interval stays within `totalBlocks` and does not intersect any other task’s range.
+- **Movement helpers**:
+  - `move(task:by:)` / `move(task:to:)` change `startIndex` directly when the destination is free.
+  - `shiftGroup(startingFrom:by:)` shifts the active task and every later task as a block (used when dragging down into occupied territory).
+  - `adjustTaskPosition(for:by:)` is the high-level entry point invoked by the UI; it tries a free move first and automatically falls back to `shiftGroup` only if necessary.
+- **Duration helpers**:
+  - `resize(task:newDuration:)` resizes a task provided the enlarged interval is still free.
+  - `adjustTaskDuration(for:by:)` clamps the requested delta between 1 block and the remaining space of the day, then delegates to `resize`.
+  - `finishTask(_:at:)` shortens the task so it ends on the 15‑minute block that covers the provided date (no other tasks are moved).
+- **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
