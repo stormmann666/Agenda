@@ -263,7 +263,11 @@ struct DayTimelineView: View {
         let delta = Int(round(offset / blockHeight))
         finishMove()
         guard delta != 0 else { return }
-        viewModel.shiftGroup(startingFrom: task, by: delta)
+        if delta > 0 {
+            viewModel.shiftGroup(startingFrom: task, by: delta)
+        } else {
+            viewModel.move(task: task, by: delta)
+        }
     }
 
     private func resetDragState() {
