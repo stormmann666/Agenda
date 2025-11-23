@@ -182,6 +182,13 @@ struct DayTimelineView: View {
                                      isCompleted: isCompleted,
                                      liveStatus: liveStatus)
                             .contentShape(Rectangle())
+                            .contextMenu {
+                                Button {
+                                    finishTaskNow(task)
+                                } label: {
+                                    Label("Terminar Box", systemImage: "flag.checkered")
+                                }
+                            }
                             .simultaneousGesture(resizeGesture(for: task))
                             .onTapGesture {
                                 selectedTaskID = task.id
@@ -286,6 +293,20 @@ struct DayTimelineView: View {
     private func finishMove() {
         moveModeTaskID = nil
         resetDragState()
+    }
+
+    private func finishTaskNow(_ task: TaskItem) {
+        let now = liveTime
+        let blockSeconds = Double(ScheduleViewModel.blockMinutes) * 60
+        let elapsed = now.timeIntervalSince(viewModel.dayStart)
+        guard elapsed >= 0 else { return }
+        let computedEndIndex = Int(ceil(elapsed / blockSeconds))
+        let clampedEndIndex = min(viewModel.totalBlocks, computedEndIndex)
+        guard clampedEndIndex > task.startIndex else { return }
+        let desiredEndIndex = min(viewModel.totalBlocks, max(task.startIndex + 1, clampedEndIndex))
+        let newDuration = desiredEndIndex - task.startIndex
+        guard newDuration < task.duration else { return }
+        viewModel.resize(task: task, newDuration: newDuration)
     }
 
     private func liveStatusInfo(for task: TaskItem) -> LiveStatusInfo? {
