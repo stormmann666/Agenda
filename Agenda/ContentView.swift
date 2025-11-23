@@ -170,50 +170,56 @@ struct DayTimelineView: View {
             let liveStatus = liveModeEnabled ? liveStatusInfo(for: task) : nil
 
             HStack(spacing: 8) {
-                ZStack(alignment: .topTrailing) {
-                    TaskCardView(category: category,
-                                 height: taskHeight,
-                                 durationMinutes: displayDuration * ScheduleViewModel.blockMinutes,
-                                 dragOffset: isDragging ? dragOffset : 0,
-                                 isDragging: isDragging,
-                                 isResizing: resizingTaskID == task.id,
-                                 isMoveModeActive: isMoveMode,
-                                 isSelected: isSelected,
-                                 isCompleted: isCompleted,
-                                 liveStatus: liveStatus)
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(resizeGesture(for: task))
-                        .onTapGesture {
-                            selectedTaskID = task.id
-                        }
-                        .onTapGesture(count: 2) {
-                            editingTask = task
-                            selectedTaskID = task.id
-                        }
+                VStack(spacing: 4) {
+                    ZStack(alignment: .topTrailing) {
+                        TaskCardView(category: category,
+                                     height: taskHeight,
+                                     durationMinutes: displayDuration * ScheduleViewModel.blockMinutes,
+                                     dragOffset: isDragging ? dragOffset : 0,
+                                     isDragging: isDragging,
+                                     isResizing: resizingTaskID == task.id,
+                                     isMoveModeActive: isMoveMode,
+                                     isSelected: isSelected,
+                                     isCompleted: isCompleted,
+                                     liveStatus: liveStatus)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(resizeGesture(for: task))
+                            .onTapGesture {
+                                selectedTaskID = task.id
+                            }
+                            .onTapGesture(count: 2) {
+                                editingTask = task
+                                selectedTaskID = task.id
+                            }
 
-                    HStack(spacing: 6) {
-                        Button {
-                            viewModel.toggleCompletion(for: task)
-                        } label: {
-                            Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .font(.headline)
-                                .foregroundColor(task.isCompleted ? .green : .gray)
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
+                        HStack(spacing: 6) {
+                            Button {
+                                viewModel.toggleCompletion(for: task)
+                            } label: {
+                                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .font(.headline)
+                                    .foregroundColor(task.isCompleted ? .green : .gray)
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
 
-                        Button {
-                            taskPendingDeletion = task
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.caption)
-                                .padding(8)
-                                .background(Color.red.opacity(0.18))
-                                .clipShape(Circle())
+                            Button {
+                                taskPendingDeletion = task
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .padding(8)
+                                    .background(Color.red.opacity(0.18))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .padding(8)
                     }
-                    .padding(8)
+
+                    if let liveStatus {
+                        LiveStatusBar(status: liveStatus)
+                    }
                 }
 
                 MoveHandleView(height: taskHeight,
@@ -379,11 +385,6 @@ struct TaskCardView: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            if let liveStatus {
-                LiveStatusBar(status: liveStatus)
-            }
-        }
         .offset(y: isDragging ? dragOffset : 0)
         .shadow(color: isMoveModeActive ? Color.blue.opacity(0.3) : .clear, radius: isMoveModeActive ? 6 : 0)
         .opacity(isCompleted ? 0.7 : 1)
@@ -434,39 +435,27 @@ struct LiveStatusBar: View {
     let status: LiveStatusInfo
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(alignment: .center, spacing: 6) {
-                VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.blue.opacity(0.25))
+                .frame(width: 120, height: 4)
+                .overlay(
                     Capsule()
-                        .fill(Color.blue.opacity(0.25))
-                        .frame(width: statusTrackWidth(for: geometry.size.width),
-                               height: 4)
-                        .overlay(
-                            Capsule()
-                                .fill(Color.blue)
-                                .frame(width: statusTrackWidth(for: geometry.size.width) * statusFraction,
-                                       height: 4),
-                            alignment: .leading
-                        )
-                    Text("\(status.remainingMinutes) min")
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                }
-                Spacer()
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+                        .fill(Color.blue)
+                        .frame(width: max(0, 120 * statusFraction), height: 4),
+                    alignment: .leading
+                )
+            Text("\(status.remainingMinutes) min")
+                .font(.caption2)
+                .foregroundColor(.blue)
+            Spacer()
         }
+        .padding(.leading, 26)
         .allowsHitTesting(false)
     }
 
     private var statusFraction: CGFloat {
         CGFloat(max(0, min(1, status.fraction)))
-    }
-
-    private func statusTrackWidth(for width: CGFloat) -> CGFloat {
-        min(width * 0.6, 160)
     }
 }
 
