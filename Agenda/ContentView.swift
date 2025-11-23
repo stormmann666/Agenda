@@ -270,17 +270,7 @@ struct DayTimelineView: View {
         let delta = Int(round(offset / blockHeight))
         finishMove()
         guard delta != 0 else { return }
-        if delta > 0 {
-            let originalStart = task.startIndex
-            viewModel.move(task: task, by: delta)
-            if let updated = viewModel.task(with: task.id),
-               updated.startIndex != originalStart {
-                return
-            }
-            viewModel.shiftGroup(startingFrom: task, by: delta)
-        } else {
-            viewModel.move(task: task, by: delta)
-        }
+        viewModel.adjustTaskPosition(for: task, by: delta)
     }
 
     private func resetDragState() {
@@ -393,9 +383,7 @@ struct DayTimelineView: View {
                    success,
                    let translation = drag?.translation {
                     let delta = Int(round(translation.height / blockHeight))
-                    let maxDuration = viewModel.totalBlocks - task.startIndex
-                    let newDuration = min(maxDuration, max(1, task.duration + delta))
-                    viewModel.resize(task: task, newDuration: newDuration)
+                    viewModel.adjustTaskDuration(for: task, by: delta)
                 }
                 resizingTaskID = nil
                 resizingPreviewDuration = 1

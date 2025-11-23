@@ -308,6 +308,31 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func adjustTaskPosition(for task: TaskItem, by deltaBlocks: Int) {
+        guard deltaBlocks != 0,
+              let current = self.task(with: task.id) else { return }
+
+        if deltaBlocks > 0 {
+            let previousStart = current.startIndex
+            move(task: current, by: deltaBlocks)
+            if let updated = self.task(with: current.id),
+               updated.startIndex == previousStart {
+                shiftGroup(startingFrom: current, by: deltaBlocks)
+            }
+        } else {
+            move(task: current, by: deltaBlocks)
+        }
+    }
+
+    func adjustTaskDuration(for task: TaskItem, by deltaBlocks: Int) {
+        guard let current = self.task(with: task.id) else { return }
+        let maxDuration = totalBlocks - current.startIndex
+        let proposed = current.duration + deltaBlocks
+        let newDuration = min(maxDuration, max(1, proposed))
+        guard newDuration != current.duration else { return }
+        resize(task: current, newDuration: newDuration)
+    }
+
     func finishTask(_ task: TaskItem, at date: Date) {
         let blockSeconds = Double(Self.blockMinutes) * 60
         mutateTasks { tasks in
