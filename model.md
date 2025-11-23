@@ -50,3 +50,13 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `adjustTaskDuration(for:by:)` clamps the requested delta between 1 block and the remaining space of the day, then delegates to `resize`.
   - `finishTask(_:at:)` shortens the task so it ends on the 15‑minute block that covers the provided date (no other tasks are moved).
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
+
+## Testing
+- `AgendaTests/ScheduleViewModelTests.swift` covers:
+  - `adjustTaskDuration` clamping to at least one block and not exceeding the day.
+  - `adjustTaskPosition` moving freely or shifting downstream groups when needed.
+  - `finishTask` rounding the task’s end time to the current 15‑minute slot.
+- Run them from Xcode (Product → Test) or via CLI:
+  ```
+  xcodebuild test -scheme Agenda -destination 'platform=iOS Simulator,name=iPhone 15'
+  ```

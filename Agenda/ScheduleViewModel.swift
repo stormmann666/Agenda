@@ -84,23 +84,23 @@ final class ScheduleViewModel: ObservableObject {
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
     private let dayLogsKey = "agenda.dayLogs.storage"
-    private var calendar: Calendar = {
-        var cal = Calendar.current
-        cal.timeZone = TimeZone.current
-        return cal
-    }()
-    private let defaults = UserDefaults.standard
+    private var calendar: Calendar
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard, calendar: Calendar = Calendar.current) {
+        var normalizedCalendar = calendar
+        normalizedCalendar.timeZone = TimeZone.current
+        self.calendar = normalizedCalendar
+        self.defaults = defaults
         categories = []
         tasks = []
         dayLogs = []
 
         let now = Date()
-        let candidateStart = Self.dailyStart(for: now, calendar: calendar)
+        let candidateStart = Self.dailyStart(for: now, calendar: self.calendar)
         let stored = defaults.object(forKey: wakeUpKey) as? Date
         var previousDayStart: Date?
-        if let stored, calendar.isDate(stored, inSameDayAs: candidateStart), stored == candidateStart {
+        if let stored, self.calendar.isDate(stored, inSameDayAs: candidateStart), stored == candidateStart {
             dayStart = stored
         } else {
             previousDayStart = stored
@@ -108,7 +108,7 @@ final class ScheduleViewModel: ObservableObject {
             defaults.set(candidateStart, forKey: wakeUpKey)
         }
 
-        let nextMidnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+        let nextMidnight = self.calendar.startOfDay(for: self.calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
         dayEnd = nextMidnight
 
         categories = loadCategories()
