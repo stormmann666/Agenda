@@ -271,6 +271,12 @@ struct DayTimelineView: View {
         finishMove()
         guard delta != 0 else { return }
         if delta > 0 {
+            let originalStart = task.startIndex
+            viewModel.move(task: task, by: delta)
+            if let updated = viewModel.task(with: task.id),
+               updated.startIndex != originalStart {
+                return
+            }
             viewModel.shiftGroup(startingFrom: task, by: delta)
         } else {
             viewModel.move(task: task, by: delta)
