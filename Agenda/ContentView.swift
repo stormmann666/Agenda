@@ -41,8 +41,11 @@ struct DayTimelineView: View {
     @State private var isClearingAllTasks = false
     @State private var moveModeTaskID: UUID?
     @State private var selectedTaskID: UUID?
-    @State private var liveModeEnabled = false
     @State private var liveTime = Date()
+    @State private var isPaused = false
+    @State private var pauseReferenceDate: Date?
+    @State private var pauseTaskID: UUID?
+    @State private var pauseAccumulatedBlocks: Int = 0
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -70,9 +73,8 @@ struct DayTimelineView: View {
                 }
             }
             .onReceive(liveTimer) { date in
-                if liveModeEnabled {
-                    liveTime = date
-                }
+                liveTime = date
+                handlePauseProgress(at: date)
             }
             .navigationTitle("Agenda diaria")
             .confirmationDialog("Tipo de tarea", isPresented: $showCategoryPicker, presenting: selectedBlockIndex) { index in
@@ -129,12 +131,9 @@ struct DayTimelineView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button {
-                        liveModeEnabled.toggle()
-                        if liveModeEnabled {
-                            liveTime = Date()
-                        }
+                        togglePause()
                     } label: {
-                        Image(systemName: liveModeEnabled ? "pause.circle" : "play.circle")
+                        Image(systemName: isPaused ? "play.circle" : "pause.circle")
                     }
 
                     Button {
@@ -167,7 +166,7 @@ struct DayTimelineView: View {
             let isMoveMode = moveModeTaskID == task.id
             let isSelected = selectedTaskID == task.id
             let isCompleted = task.isCompleted
-            let liveStatus = liveModeEnabled ? liveStatusInfo(for: task) : nil
+            let liveStatus = liveStatusInfo(for: task)
 
             HStack(spacing: 8) {
                 VStack(spacing: 4) {
@@ -264,7 +263,7 @@ struct DayTimelineView: View {
         let delta = Int(round(offset / blockHeight))
         finishMove()
         guard delta != 0 else { return }
-        viewModel.move(task: task, by: delta)
+        viewModel.shiftGroup(startingFrom: task, by: delta)
     }
 
     private func resetDragState() {
@@ -295,6 +294,46 @@ struct DayTimelineView: View {
         let fraction = max(0, min(1, remaining / total))
         let minutes = max(0, Int(ceil(remaining / 60)))
         return LiveStatusInfo(remainingMinutes: minutes, fraction: fraction)
+    }
+
+    private func togglePause() {
+        if isPaused {
+            isPaused = false
+            pauseReferenceDate = nil
+            pauseTaskID = nil
+            pauseAccumulatedBlocks = 0
+        } else {
+            isPaused = true
+            pauseReferenceDate = liveTime
+            pauseAccumulatedBlocks = 0
+            pauseTaskID = currentTask(at: liveTime)?.id
+        }
+    }
+
+    private func handlePauseProgress(at currentDate: Date) {
+        guard isPaused,
+              let reference = pauseReferenceDate,
+              let taskID = pauseTaskID,
+              let task = viewModel.task(with: taskID) else {
+            return
+        }
+        let blockSeconds = Double(ScheduleViewModel.blockMinutes * 60)
+        let elapsed = max(0, currentDate.timeIntervalSince(reference))
+        let totalBlocks = Int(elapsed / blockSeconds)
+        guard totalBlocks > pauseAccumulatedBlocks else { return }
+        let delta = totalBlocks - pauseAccumulatedBlocks
+        viewModel.shiftTasks(from: task.startIndex, by: delta)
+        pauseAccumulatedBlocks += delta
+    }
+
+    private func currentTask(at date: Date) -> TaskItem? {
+        let blocks = viewModel.timelineBlocks()
+        return blocks.first { block in
+            guard let task = block.task else { return false }
+            let startDate = viewModel.date(for: block.index)
+            let endDate = viewModel.date(for: block.index + task.duration)
+            return date >= startDate && date < endDate
+        }?.task
     }
 
     private func resizeGesture(for task: TaskItem) -> some Gesture {

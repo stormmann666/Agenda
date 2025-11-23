@@ -226,6 +226,10 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func task(with id: UUID) -> TaskItem? {
+        tasks.first { $0.id == id }
+    }
+
     func updateCategory(_ category: TaskCategory) {
         guard let index = categories.firstIndex(where: { $0.id == category.id }) else { return }
         mutateCategories { categories in
@@ -261,6 +265,46 @@ final class ScheduleViewModel: ObservableObject {
     func clearAllTasks() {
         mutateTasks { tasks in
             tasks.removeAll()
+        }
+    }
+
+    func shiftTasks(from startIndex: Int, by delta: Int) {
+        guard delta > 0 else { return }
+        mutateTasks { tasks in
+            for index in tasks.indices {
+                if tasks[index].startIndex >= startIndex {
+                    let newStart = min(max(0, totalBlocks - tasks[index].duration), tasks[index].startIndex + delta)
+                    tasks[index].startIndex = newStart
+                }
+            }
+            tasks.sort { $0.startIndex < $1.startIndex }
+        }
+    }
+
+    func shiftGroup(startingFrom task: TaskItem, by delta: Int) {
+        guard delta != 0 else { return }
+        mutateTasks { tasks in
+            guard tasks.contains(where: { $0.id == task.id }) else { return }
+            let group = tasks.filter { $0.startIndex >= task.startIndex }
+            guard !group.isEmpty else { return }
+            let sortedGroup = group.sorted { $0.startIndex < $1.startIndex }
+            let prevEnd = tasks
+                .filter { $0.startIndex < task.startIndex }
+                .map { $0.startIndex + $0.duration }
+                .max() ?? 0
+            let groupMinStart = sortedGroup.first?.startIndex ?? task.startIndex
+            let groupMaxEnd = sortedGroup.map { $0.startIndex + $0.duration }.max() ?? (task.startIndex + task.duration)
+
+            if delta > 0 {
+                guard groupMaxEnd + delta <= totalBlocks else { return }
+            } else {
+                guard groupMinStart + delta >= prevEnd else { return }
+            }
+
+            for index in tasks.indices where tasks[index].startIndex >= task.startIndex {
+                tasks[index].startIndex += delta
+            }
+            tasks.sort { $0.startIndex < $1.startIndex }
         }
     }
 
