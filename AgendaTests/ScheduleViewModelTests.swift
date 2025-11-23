@@ -78,4 +78,20 @@ final class ScheduleViewModelTests: XCTestCase {
         viewModel.finishTask(task, at: halfway)
         XCTAssertEqual(viewModel.task(with: task.id)?.duration, 2, "Task should end on the block covering the provided date")
     }
+
+    func testAdjustTaskEndTimeShortensToExplicitHour() {
+        let task = makeTask(start: 4, duration: 6)
+        let (viewModel, cleanup) = makeViewModel(tasks: [task])
+        defer { cleanup() }
+
+        let endDate = viewModel.date(for: task.startIndex).addingTimeInterval(Double(ScheduleViewModel.blockMinutes * 3) * 60)
+        viewModel.adjustTaskEndTime(for: task, to: endDate)
+
+        XCTAssertEqual(viewModel.task(with: task.id)?.duration, 3, "Task should now finish exactly at the requested time boundary")
+
+        // Requesting a later time (beyond current duration) keeps duration unchanged
+        let laterEnd = viewModel.date(for: task.startIndex + 10)
+        viewModel.adjustTaskEndTime(for: task, to: laterEnd)
+        XCTAssertEqual(viewModel.task(with: task.id)?.duration, 3, "Task should not extend when forcing an end time past its current duration")
+    }
 }

@@ -333,21 +333,26 @@ final class ScheduleViewModel: ObservableObject {
         resize(task: current, newDuration: newDuration)
     }
 
-    func finishTask(_ task: TaskItem, at date: Date) {
+    func adjustTaskEndTime(for task: TaskItem, to endDate: Date) {
         let blockSeconds = Double(Self.blockMinutes) * 60
         mutateTasks { tasks in
             guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-            let startDate = self.date(for: tasks[index].startIndex)
-            guard date > startDate else { return }
-            let elapsed = date.timeIntervalSince(startDate)
+            let startIndex = tasks[index].startIndex
+            let startDate = self.date(for: startIndex)
+            guard endDate > startDate else { return }
+            let elapsed = endDate.timeIntervalSince(startDate)
             guard elapsed > 0 else { return }
             let rawBlocks = elapsed / blockSeconds
             let desiredBlocks = Int(ceil(rawBlocks))
             let clamped = max(1, min(tasks[index].duration, desiredBlocks))
-            guard clamped < tasks[index].duration else { return }
+            guard clamped != tasks[index].duration else { return }
             tasks[index].duration = clamped
             tasks.sort { $0.startIndex < $1.startIndex }
         }
+    }
+
+    func finishTask(_ task: TaskItem, at date: Date) {
+        adjustTaskEndTime(for: task, to: date)
     }
 
     private func update(taskID: UUID, updateBlock: (inout TaskItem) -> Void) {

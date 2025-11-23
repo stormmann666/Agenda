@@ -48,7 +48,8 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
 - **Duration helpers**:
   - `resize(task:newDuration:)` resizes a task provided the enlarged interval is still free.
   - `adjustTaskDuration(for:by:)` clamps the requested delta between 1 block and the remaining space of the day, then delegates to `resize`.
-  - `finishTask(_:at:)` shortens the task so it ends on the 15‑minute block that covers the provided date (no other tasks are moved).
+  - `adjustTaskEndTime(for:to:)` lets callers specify the exact end `Date` (rounded up to the next 15‑minute block and never extending beyond the current duration).
+  - `finishTask(_:at:)` is a convenience that forwards the current time to `adjustTaskEndTime`.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
 ## Testing
