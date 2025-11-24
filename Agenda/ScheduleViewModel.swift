@@ -334,12 +334,21 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func setTaskFocusIndeterminate(_ task: TaskItem, isIndeterminate: Bool) {
+        var removedFocusID: UUID?
         update(taskID: task.id) { mutable in
             if isIndeterminate {
+                removedFocusID = mutable.focusID
                 mutable.focusID = nil
                 mutable.isFocusIndeterminate = true
             } else {
                 mutable.isFocusIndeterminate = false
+            }
+        }
+        if let focusID = removedFocusID {
+            mutateFocuses { focuses in
+                if let index = focuses.firstIndex(where: { $0.id == focusID }) {
+                    focuses[index].assignedTaskID = nil
+                }
             }
         }
     }

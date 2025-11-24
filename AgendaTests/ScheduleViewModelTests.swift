@@ -114,19 +114,23 @@ final class ScheduleViewModelTests: XCTestCase {
      XCTAssertNil(viewModel.focus(with: focus.id)?.assignedTaskID, "Deleting the task should free the focus")
      }
      
-     func testFocusIndeterminateState() {
-     let task = makeTask(start: 6, duration: 3)
-     let (viewModel, cleanup) = makeViewModel(tasks: [task])
-     defer { cleanup() }
-     
-     viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
-     XCTAssertTrue(viewModel.task(with: task.id)?.isFocusIndeterminate ?? false)
-     XCTAssertNil(viewModel.task(with: task.id)?.focusID)
-     
-     let focus = viewModel.addFocus(name: "Attach later")
-     viewModel.assignFocus(focus, to: task)
-     XCTAssertFalse(viewModel.task(with: task.id)?.isFocusIndeterminate ?? true)
-     XCTAssertEqual(viewModel.task(with: task.id)?.focusID, focus.id)
-     }
+    func testFocusIndeterminateState() {
+        let task = makeTask(start: 6, duration: 3)
+        let (viewModel, cleanup) = makeViewModel(tasks: [task])
+        defer { cleanup() }
+
+        viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
+        XCTAssertTrue(viewModel.task(with: task.id)?.isFocusIndeterminate ?? false)
+        XCTAssertNil(viewModel.task(with: task.id)?.focusID)
+
+        let focus = viewModel.addFocus(name: "Attach later")
+        viewModel.assignFocus(focus, to: task)
+        XCTAssertFalse(viewModel.task(with: task.id)?.isFocusIndeterminate ?? true)
+        XCTAssertEqual(viewModel.task(with: task.id)?.focusID, focus.id)
+
+        viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
+        XCTAssertNil(viewModel.focus(with: focus.id)?.assignedTaskID)
+        XCTAssertTrue(viewModel.task(with: task.id)?.isFocusIndeterminate ?? false)
+    }
      }*/
 }
