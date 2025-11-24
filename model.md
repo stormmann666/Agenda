@@ -17,6 +17,7 @@
   - `duration: Int` – Number of slots (minimum 1).
   - `isCompleted: Bool` – New flag toggled from the check button inside each card.
   - `focusID: UUID?` – Optional link to a `FocusItem` currently embedded in the box.
+  - `isFocusIndeterminate: Bool` – Indicates the box is marked as focused but without a concrete `FocusItem`.
 - **Behavior**
   - When moving/resizing we only change `startIndex`/`duration` if the interval does not overlap with another task (`canPlace`).
   - Encoding provides a default (`false`) for `isCompleted` so older persisted data continues to load.
@@ -63,7 +64,8 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `finishTask(_:at:)` is a convenience that forwards the current time to `adjustTaskEndTime`.
 - **Focus helpers**:
   - `addFocus`, `updateFocus`, `deleteFocus` manage the standalone focus backlog.
-  - `assignFocus(_:to:)` embeds or removes a focus from a task, keeping both sides synchronized.
+  - `assignFocus(_:to:)` embeds or removes a focus from a task, keeping both sides synchronized and clearing `isFocusIndeterminate`.
+  - `setTaskFocusIndeterminate(_:isIndeterminate:)` toggles the “focused but undecided” state that clears `focusID` while keeping the box marked as focused.
   - Focus persistence stays consistent through `mutateTasks` calling `cleanupFocusAssignments()` so any dangling assignments are automatically cleared when tasks disappear.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
@@ -72,7 +74,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `adjustTaskDuration` clamping to at least one block and not exceeding the day.
   - `adjustTaskPosition` moving freely or shifting downstream groups when needed.
   - `finishTask` rounding the task’s end time to the current 15‑minute slot.
-  - `adjustTaskEndTime` honoring explicit end hours and the focus assignment lifecycle (`testFocusLifecycleAssignAndDetach`).
+  - `adjustTaskEndTime` honoring explicit end hours and the focus assignment lifecycle (`testFocusLifecycleAssignAndDetach`, `testFocusIndeterminateState`).
 - Run them from Xcode (Product → Test) or via CLI:
   ```
   xcodebuild test -scheme Agenda -destination 'platform=iOS Simulator,name=iPhone 15'

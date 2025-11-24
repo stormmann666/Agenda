@@ -31,23 +31,26 @@ struct TaskItem: Identifiable, Codable, Hashable {
     var duration: Int
     var isCompleted: Bool
     var focusID: UUID?
+    var isFocusIndeterminate: Bool
 
     init(id: UUID = UUID(),
          categoryID: UUID,
          startIndex: Int,
          duration: Int,
          isCompleted: Bool = false,
-         focusID: UUID? = nil) {
+         focusID: UUID? = nil,
+         isFocusIndeterminate: Bool = false) {
         self.id = id
         self.categoryID = categoryID
         self.startIndex = startIndex
         self.duration = duration
         self.isCompleted = isCompleted
         self.focusID = focusID
+        self.isFocusIndeterminate = isFocusIndeterminate
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, categoryID, startIndex, duration, isCompleted, focusID
+        case id, categoryID, startIndex, duration, isCompleted, focusID, isFocusIndeterminate
     }
 
     init(from decoder: Decoder) throws {
@@ -58,6 +61,7 @@ struct TaskItem: Identifiable, Codable, Hashable {
         duration = try container.decode(Int.self, forKey: .duration)
         isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         focusID = try container.decodeIfPresent(UUID.self, forKey: .focusID)
+        isFocusIndeterminate = try container.decodeIfPresent(Bool.self, forKey: .isFocusIndeterminate) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -68,6 +72,7 @@ struct TaskItem: Identifiable, Codable, Hashable {
         try container.encode(duration, forKey: .duration)
         try container.encode(isCompleted, forKey: .isCompleted)
         try container.encodeIfPresent(focusID, forKey: .focusID)
+        try container.encode(isFocusIndeterminate, forKey: .isFocusIndeterminate)
     }
 }
 
@@ -296,9 +301,11 @@ final class ScheduleViewModel: ObservableObject {
             for index in tasks.indices {
                 if tasks[index].focusID == focus.id {
                     tasks[index].focusID = nil
+                    tasks[index].isFocusIndeterminate = false
                 }
                 if let targetID, tasks[index].id == targetID {
                     tasks[index].focusID = focus.id
+                    tasks[index].isFocusIndeterminate = false
                 }
             }
         }
@@ -306,6 +313,17 @@ final class ScheduleViewModel: ObservableObject {
         mutateFocuses { focuses in
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             focuses[index].assignedTaskID = targetID
+        }
+    }
+
+    func setTaskFocusIndeterminate(_ task: TaskItem, isIndeterminate: Bool) {
+        update(taskID: task.id) { mutable in
+            if isIndeterminate {
+                mutable.focusID = nil
+                mutable.isFocusIndeterminate = true
+            } else {
+                mutable.isFocusIndeterminate = false
+            }
         }
     }
 
