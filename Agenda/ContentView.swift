@@ -52,6 +52,7 @@ struct DayTimelineView: View {
     @State private var pauseAccumulatedBlocks: Int = 0
     @State private var timelineRefreshID = UUID()
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var showingEndDayPlaceholder = false
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -144,12 +145,24 @@ struct DayTimelineView: View {
                 }
                 Button("Cancelar", role: .cancel) { }
             }
+            .alert("Terminar día", isPresented: $showingEndDayPlaceholder) {
+                Button("Entendido") { }
+            } message: {
+                Text("Acción pendiente de definir.")
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
                         scrollToCurrentHour(animated: true)
                     } label: {
                         Image(systemName: "play.fill")
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingEndDayPlaceholder = true
+                    } label: {
+                        Image(systemName: "flag.checkered")
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
