@@ -16,9 +16,19 @@
   - `startIndex: Int` – Slot index (15‑minute increments) since `dayStart`.
   - `duration: Int` – Number of slots (minimum 1).
   - `isCompleted: Bool` – New flag toggled from the check button inside each card.
+  - `focusID: UUID?` – Optional link to a `FocusItem` currently embedded in the box.
 - **Behavior**
   - When moving/resizing we only change `startIndex`/`duration` if the interval does not overlap with another task (`canPlace`).
   - Encoding provides a default (`false`) for `isCompleted` so older persisted data continues to load.
+
+### `FocusItem`
+- **Fields**
+  - `id: UUID`
+  - `name: String`
+  - `assignedTaskID: UUID?` – Identifies the task currently hosting the focus (if any).
+- **Behavior**
+  - Focuses live independently from boxes. They can exist unassigned (waiting to be placed) or associated with a single task.
+  - Assigning/detaching a focus updates both the task (`focusID`) and the focus (`assignedTaskID`) so the relationship stays in sync.
 
 ### `ScheduleDayLog`
 - **Fields**
@@ -36,6 +46,7 @@
 - `agenda.tasks.storage` → `[TaskItem]` for the active day.
 - `agenda.dayLogs.storage` → `[ScheduleDayLog]` historical archive.
 - `agenda.wakeUpAnchor` → `Date` used as the start of the currently active day.
+- `agenda.focuses.storage` → `[FocusItem]` independent focus backlog.
 
 All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `UserDefaults.standard`.
 
@@ -50,6 +61,10 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `adjustTaskDuration(for:by:)` clamps the requested delta between 1 block and the remaining space of the day, then delegates to `resize`.
   - `adjustTaskEndTime(for:to:)` lets callers specify the exact end `Date` (rounded up to the next 15‑minute block and never extending beyond the current duration).
   - `finishTask(_:at:)` is a convenience that forwards the current time to `adjustTaskEndTime`.
+- **Focus helpers**:
+  - `addFocus`, `updateFocus`, `deleteFocus` manage the standalone focus backlog.
+  - `assignFocus(_:to:)` embeds or removes a focus from a task, keeping both sides synchronized.
+  - Focus persistence stays consistent through `mutateTasks` calling `cleanupFocusAssignments()` so any dangling assignments are automatically cleared when tasks disappear.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
 ## Testing
@@ -57,6 +72,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `adjustTaskDuration` clamping to at least one block and not exceeding the day.
   - `adjustTaskPosition` moving freely or shifting downstream groups when needed.
   - `finishTask` rounding the task’s end time to the current 15‑minute slot.
+  - `adjustTaskEndTime` honoring explicit end hours and the focus assignment lifecycle (`testFocusLifecycleAssignAndDetach`).
 - Run them from Xcode (Product → Test) or via CLI:
   ```
   xcodebuild test -scheme Agenda -destination 'platform=iOS Simulator,name=iPhone 15'

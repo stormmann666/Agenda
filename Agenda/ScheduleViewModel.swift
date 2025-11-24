@@ -30,17 +30,24 @@ struct TaskItem: Identifiable, Codable, Hashable {
     var startIndex: Int
     var duration: Int
     var isCompleted: Bool
+    var focusID: UUID?
 
-    init(id: UUID = UUID(), categoryID: UUID, startIndex: Int, duration: Int, isCompleted: Bool = false) {
+    init(id: UUID = UUID(),
+         categoryID: UUID,
+         startIndex: Int,
+         duration: Int,
+         isCompleted: Bool = false,
+         focusID: UUID? = nil) {
         self.id = id
         self.categoryID = categoryID
         self.startIndex = startIndex
         self.duration = duration
         self.isCompleted = isCompleted
+        self.focusID = focusID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, categoryID, startIndex, duration, isCompleted
+        case id, categoryID, startIndex, duration, isCompleted, focusID
     }
 
     init(from decoder: Decoder) throws {
@@ -50,6 +57,7 @@ struct TaskItem: Identifiable, Codable, Hashable {
         startIndex = try container.decode(Int.self, forKey: .startIndex)
         duration = try container.decode(Int.self, forKey: .duration)
         isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        focusID = try container.decodeIfPresent(UUID.self, forKey: .focusID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -59,6 +67,19 @@ struct TaskItem: Identifiable, Codable, Hashable {
         try container.encode(startIndex, forKey: .startIndex)
         try container.encode(duration, forKey: .duration)
         try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encodeIfPresent(focusID, forKey: .focusID)
+    }
+}
+
+struct FocusItem: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var assignedTaskID: UUID?
+
+    init(id: UUID = UUID(), name: String, assignedTaskID: UUID? = nil) {
+        self.id = id
+        self.name = name
+        self.assignedTaskID = assignedTaskID
     }
 }
 
@@ -76,6 +97,7 @@ final class ScheduleViewModel: ObservableObject {
     @Published var categories: [TaskCategory]
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]
+    @Published var focuses: [FocusItem]
 
     let dayStart: Date
     let dayEnd: Date
@@ -84,6 +106,7 @@ final class ScheduleViewModel: ObservableObject {
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
     private let dayLogsKey = "agenda.dayLogs.storage"
+    private let focusesKey = "agenda.focuses.storage"
     private var calendar: Calendar
     private let defaults: UserDefaults
 
@@ -95,6 +118,7 @@ final class ScheduleViewModel: ObservableObject {
         categories = []
         tasks = []
         dayLogs = []
+        focuses = []
 
         let now = Date()
         let candidateStart = Self.dailyStart(for: now, calendar: self.calendar)
@@ -112,6 +136,7 @@ final class ScheduleViewModel: ObservableObject {
         dayEnd = nextMidnight
 
         categories = loadCategories()
+        focuses = loadFocuses()
         let loadedTasks = loadTasks()
         dayLogs = loadDayLogs()
 
@@ -122,6 +147,7 @@ final class ScheduleViewModel: ObservableObject {
         } else {
             tasks = loadedTasks
         }
+        cleanupFocusAssignments()
     }
 
     var totalBlocks: Int {
@@ -228,6 +254,59 @@ final class ScheduleViewModel: ObservableObject {
 
     func task(with id: UUID) -> TaskItem? {
         tasks.first { $0.id == id }
+    }
+
+    func focus(with id: UUID) -> FocusItem? {
+        focuses.first { $0.id == id }
+    }
+
+    func addFocus(name: String) -> FocusItem {
+        let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name)
+        mutateFocuses { focuses in
+            focuses.append(newFocus)
+        }
+        return newFocus
+    }
+
+    func updateFocus(_ focus: FocusItem) {
+        mutateFocuses { focuses in
+            guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
+            focuses[index] = focus
+        }
+    }
+
+    func deleteFocus(_ focus: FocusItem) {
+        mutateFocuses { focuses in
+            focuses.removeAll { $0.id == focus.id }
+        }
+        mutateTasks { tasks in
+            for index in tasks.indices where tasks[index].focusID == focus.id {
+                tasks[index].focusID = nil
+            }
+        }
+    }
+
+    func assignFocus(_ focus: FocusItem, to task: TaskItem?) {
+        let targetID = task?.id
+        if let targetID, self.task(with: targetID) == nil {
+            return
+        }
+
+        mutateTasks { tasks in
+            for index in tasks.indices {
+                if tasks[index].focusID == focus.id {
+                    tasks[index].focusID = nil
+                }
+                if let targetID, tasks[index].id == targetID {
+                    tasks[index].focusID = focus.id
+                }
+            }
+        }
+
+        mutateFocuses { focuses in
+            guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
+            focuses[index].assignedTaskID = targetID
+        }
     }
 
     func updateCategory(_ category: TaskCategory) {
@@ -369,6 +448,7 @@ final class ScheduleViewModel: ObservableObject {
         transform(&updated)
         tasks = updated
         saveTasks()
+        cleanupFocusAssignments()
     }
 
     private func mutateCategories(_ transform: (inout [TaskCategory]) -> Void) {
@@ -376,6 +456,13 @@ final class ScheduleViewModel: ObservableObject {
         transform(&updated)
         categories = updated
         saveCategories()
+    }
+
+    private func mutateFocuses(_ transform: (inout [FocusItem]) -> Void) {
+        var updated = focuses
+        transform(&updated)
+        focuses = updated
+        saveFocuses()
     }
 
     private func loadCategories() -> [TaskCategory] {
@@ -415,6 +502,39 @@ final class ScheduleViewModel: ObservableObject {
     private func saveCategories() {
         guard let data = try? JSONEncoder().encode(categories) else { return }
         defaults.set(data, forKey: categoriesKey)
+    }
+
+    private func loadFocuses() -> [FocusItem] {
+        guard
+            let data = defaults.data(forKey: focusesKey),
+            let decoded = try? JSONDecoder().decode([FocusItem].self, from: data)
+        else {
+            return []
+        }
+        return decoded
+    }
+
+    private func saveFocuses() {
+        guard let data = try? JSONEncoder().encode(focuses) else { return }
+        defaults.set(data, forKey: focusesKey)
+    }
+
+    private func cleanupFocusAssignments() {
+        guard !focuses.isEmpty else { return }
+        let taskIDs = Set(tasks.map { $0.id })
+        var updated = focuses
+        var changed = false
+        for index in updated.indices {
+            if let assigned = updated[index].assignedTaskID,
+               !taskIDs.contains(assigned) {
+                updated[index].assignedTaskID = nil
+                changed = true
+            }
+        }
+        if changed {
+            focuses = updated
+            saveFocuses()
+        }
     }
 
     private func archiveDay(date: Date, tasks: [TaskItem]) {
