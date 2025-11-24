@@ -869,93 +869,116 @@ struct TaskEditorSheet: View {
     @ObservedObject var viewModel: ScheduleViewModel
     let taskID: UUID
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedFocusOption: FocusOption = .none
+    @State private var suppressSelectionUpdate = false
 
     var body: some View {
         NavigationStack {
-            if let task = viewModel.task(with: taskID) {
-                Form {
-                    focusSection(for: task)
-                }
-                .navigationTitle("Focus del box")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Cerrar") {
-                            dismiss()
-                        }
+            Form {
+                focusSection
+            }
+            .navigationTitle("Focus del box")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Cerrar") {
+                        dismiss()
                     }
                 }
-            } else {
-                ContentUnavailableView("Tarea no encontrada",
-                                       systemImage: "exclamationmark.triangle",
-                                       description: Text("Esta tarea ya no está disponible."))
+            }
+            .overlay {
+                if viewModel.task(with: taskID) == nil {
+                    ContentUnavailableView("Tarea no encontrada",
+                                           systemImage: "exclamationmark.triangle",
+                                           description: Text("Esta tarea ya no está disponible."))
+                }
+            }
+            .onAppear {
+                synchronizeSelection()
+            }
+            .onChange(of: viewModel.tasks) { _ in
+                synchronizeSelection()
+            }
+            .onChange(of: viewModel.focuses) { _ in
+                synchronizeSelection()
+            }
+            .onChange(of: selectedFocusOption) { newValue in
+                guard !suppressSelectionUpdate else { return }
+                applySelection(newValue)
             }
         }
     }
 
-    @ViewBuilder
-    private func focusSection(for task: TaskItem) -> some View {
+    private var focusSection: some View {
         Section("Focus") {
-            Button {
-                viewModel.clearFocus(for: task)
-            } label: {
-                HStack {
-                    Text("Sin focus")
-                    Spacer()
-                    if task.focusID == nil && !task.isFocusIndeterminate {
-                        Image(systemName: "checkmark")
-                            .foregroundColor(.accentColor)
+            Picker("Estado", selection: $selectedFocusOption) {
+                Text("Sin focus")
+                    .tag(FocusOption.none)
+                Text("Focus indeterminado")
+                    .tag(FocusOption.indeterminate)
+                if viewModel.focuses.isEmpty {
+                    Text("No hay focuses disponibles")
+                        .tag(FocusOption.none)
+                        .disabled(true)
+                } else {
+                    ForEach(viewModel.focuses) { focus in
+                        Text(focus.name)
+                            .tag(FocusOption.focus(focus.id))
                     }
                 }
             }
-            .buttonStyle(.plain)
-
-            Button {
-                viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
-            } label: {
-                HStack {
-                    Text("Focus indeterminado")
-                    Spacer()
-                    if task.isFocusIndeterminate {
-                        Image(systemName: "checkmark")
-                            .foregroundColor(.accentColor)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
+            .pickerStyle(.inline)
 
             if viewModel.focuses.isEmpty {
                 Text("Añade focuses desde la pestaña Focuses para asignarlos aquí.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.focuses) { focus in
-                    Button {
-                        viewModel.assignFocus(focus, to: task)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(focus.name)
-                                Spacer()
-                                if task.focusID == focus.id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.accentColor)
-                                }
-                            }
-                            if let assignedTaskID = focus.assignedTaskID,
-                               assignedTaskID != task.id {
-                                Text("Asignada a otra tarea (se moverá aquí)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else if task.focusID == focus.id {
-                                Text("Usando este focus")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
+            } else if case let .focus(focusID) = selectedFocusOption,
+                      let focus = viewModel.focus(with: focusID),
+                      let assignedTaskID = focus.assignedTaskID,
+                      assignedTaskID != taskID {
+                Text("Este focus se reasignará a este box.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func synchronizeSelection() {
+        guard let task = viewModel.task(with: taskID) else { return }
+        let newSelection: FocusOption
+        if let focusID = task.focusID {
+            newSelection = .focus(focusID)
+        } else if task.isFocusIndeterminate {
+            newSelection = .indeterminate
+        } else {
+            newSelection = .none
+        }
+        if newSelection != selectedFocusOption {
+            suppressSelectionUpdate = true
+            selectedFocusOption = newSelection
+            DispatchQueue.main.async {
+                suppressSelectionUpdate = false
+            }
+        }
+    }
+
+    private func applySelection(_ option: FocusOption) {
+        guard let task = viewModel.task(with: taskID) else { return }
+        switch option {
+        case .none:
+            viewModel.clearFocus(for: task)
+        case .indeterminate:
+            viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
+        case .focus(let id):
+            if let focus = viewModel.focus(with: id) {
+                viewModel.assignFocus(focus, to: task)
+            }
+        }
+    }
+
+    private enum FocusOption: Hashable {
+        case none
+        case indeterminate
+        case focus(UUID)
     }
 }

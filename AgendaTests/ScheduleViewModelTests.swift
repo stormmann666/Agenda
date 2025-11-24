@@ -105,9 +105,9 @@ final class ScheduleViewModelTests: XCTestCase {
      XCTAssertEqual(viewModel.task(with: task.id)?.focusID, focus.id)
      XCTAssertEqual(viewModel.focus(with: focus.id)?.assignedTaskID, task.id)
      
-     viewModel.assignFocus(focus, to: nil)
-     XCTAssertNil(viewModel.task(with: task.id)?.focusID)
-     XCTAssertNil(viewModel.focus(with: focus.id)?.assignedTaskID)
+        viewModel.clearFocus(for: task)
+        XCTAssertNil(viewModel.task(with: task.id)?.focusID)
+        XCTAssertNil(viewModel.focus(with: focus.id)?.assignedTaskID)
      
      viewModel.assignFocus(focus, to: task)
      viewModel.delete(task: task)
