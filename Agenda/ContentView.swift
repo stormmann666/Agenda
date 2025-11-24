@@ -915,12 +915,12 @@ struct TaskEditorSheet: View {
                     .tag(FocusOption.none)
                 Text("Focus indeterminado")
                     .tag(FocusOption.indeterminate)
-                if viewModel.focuses.isEmpty {
+                if availableFocuses.isEmpty {
                     Text("No hay focuses disponibles")
                         .tag(FocusOption.none)
                         .disabled(true)
                 } else {
-                    ForEach(viewModel.focuses) { focus in
+                    ForEach(availableFocuses) { focus in
                         Text(focus.name)
                             .tag(FocusOption.focus(focus.id))
                     }
@@ -928,7 +928,7 @@ struct TaskEditorSheet: View {
             }
             .pickerStyle(.inline)
 
-            if viewModel.focuses.isEmpty {
+            if availableFocuses.isEmpty {
                 Text("Añade focuses desde la pestaña Focuses para asignarlos aquí.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -946,7 +946,9 @@ struct TaskEditorSheet: View {
     private func synchronizeSelection() {
         guard let task = viewModel.task(with: taskID) else { return }
         let newSelection: FocusOption
-        if let focusID = task.focusID {
+        if let focusID = task.focusID,
+           let focus = viewModel.focus(with: focusID),
+           focus.assignedTaskID == nil || focus.assignedTaskID == taskID {
             newSelection = .focus(focusID)
         } else if task.isFocusIndeterminate {
             newSelection = .indeterminate
@@ -970,7 +972,8 @@ struct TaskEditorSheet: View {
         case .indeterminate:
             viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
         case .focus(let id):
-            if let focus = viewModel.focus(with: id) {
+            if let focus = viewModel.focus(with: id),
+               focus.assignedTaskID == nil || focus.assignedTaskID == task.id {
                 viewModel.assignFocus(focus, to: task)
             }
         }
@@ -980,5 +983,11 @@ struct TaskEditorSheet: View {
         case none
         case indeterminate
         case focus(UUID)
+    }
+
+    private var availableFocuses: [FocusItem] {
+        viewModel.focuses.filter { focus in
+            focus.assignedTaskID == nil || focus.assignedTaskID == taskID
+        }
     }
 }
