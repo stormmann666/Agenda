@@ -909,27 +909,21 @@ struct TaskEditorSheet: View {
     }
 
     private var focusSection: some View {
-        Section("Focus") {
-            Picker("Estado", selection: $selectedFocusOption) {
+        Section {
+            Picker("Focus", selection: $selectedFocusOption) {
                 Text("Sin focus")
                     .tag(FocusOption.none)
                 Text("Focus indeterminado")
                     .tag(FocusOption.indeterminate)
-                if availableFocuses.isEmpty {
-                    Text("No hay focuses disponibles")
-                        .tag(FocusOption.none)
-                        .disabled(true)
-                } else {
-                    ForEach(availableFocuses) { focus in
-                        Text(focus.name)
-                            .tag(FocusOption.focus(focus.id))
-                    }
+                ForEach(availableFocuses) { focus in
+                    Text(focus.name)
+                        .tag(FocusOption.focus(focus.id))
                 }
             }
             .pickerStyle(.inline)
 
             if availableFocuses.isEmpty {
-                Text("Añade focuses desde la pestaña Focuses para asignarlos aquí.")
+                Text("No hay focuses libres ahora mismo.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if case let .focus(focusID) = selectedFocusOption,
