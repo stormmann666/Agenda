@@ -59,6 +59,11 @@ struct DayTimelineView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.timelineBlocks()) { block in
+                            let blocksPerHour = ScheduleViewModel.blocksPerHour
+                            if block.index % blocksPerHour == 0 {
+                                HourMarkerView(label: hourRangeLabel(for: block.index))
+                                    .padding(.bottom, 2)
+                            }
                             HStack(alignment: .top, spacing: 12) {
                                 Text(viewModel.label(for: block.index))
                                     .font(.caption)
@@ -264,7 +269,7 @@ struct DayTimelineView: View {
         } else {
             let blocksPerHour = ScheduleViewModel.blocksPerHour
             let isAlternate = ((block.index / blocksPerHour) % 2 == 1)
-            EmptySlot(height: height, isAlternateHour: isAlternate)
+            EmptySlot(height: height, strokeColor: hourStrokeColor(isAlternateHour: isAlternate))
                 .onTapGesture {
                     selectedBlockIndex = block.index
                     showCategoryPicker = true
@@ -362,6 +367,22 @@ struct DayTimelineView: View {
             return String(firstLine)
         }
         return focus.name
+    }
+
+    private func hourRangeLabel(for index: Int) -> String {
+        let startDate = viewModel.date(for: index)
+        let calendar = Calendar.current
+        let startHour = calendar.component(.hour, from: startDate)
+        let endHour = (startHour + 1) % 24
+        return "\(String(format: "%02d", startHour)) - \(String(format: "%02d", endHour)) h"
+    }
+
+    private func hourStrokeColor(isAlternateHour: Bool) -> Color {
+        if isAlternateHour {
+            return Color(red: 0.3, green: 0.5, blue: 0.8).opacity(0.5)
+        } else {
+            return Color(red: 0.8, green: 0.6, blue: 0.3).opacity(0.5)
+        }
     }
 
     private func togglePause() {
@@ -577,16 +598,12 @@ struct LiveStatusBar: View {
 
 struct EmptySlot: View {
     let height: CGFloat
-    let isAlternateHour: Bool
+    let strokeColor: Color
 
     var body: some View {
         RoundedRectangle(cornerRadius: 12)
-            .fill(slotBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [6]))
-                    .foregroundColor(.secondary.opacity(0.3))
-            )
+            .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [6]))
+            .foregroundColor(strokeColor)
             .frame(height: height)
             .overlay(
                 Text("Toque para asignar")
@@ -595,10 +612,6 @@ struct EmptySlot: View {
                     .allowsHitTesting(false)
             )
             .contentShape(Rectangle())
-    }
-
-    private var slotBackground: Color {
-        isAlternateHour ? Color.secondary.opacity(0.08) : Color.secondary.opacity(0.03)
     }
 }
 
@@ -1024,5 +1037,21 @@ struct TaskEditorSheet: View {
         viewModel.focuses.filter { focus in
             focus.assignedTaskID == nil || focus.assignedTaskID == taskID
         }
+    }
+}
+
+struct HourMarkerView: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.blue.opacity(0.7))
+            Rectangle()
+                .fill(Color.secondary.opacity(0.2))
+                .frame(height: 1)
+        }
+        .padding(.horizontal)
     }
 }
