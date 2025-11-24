@@ -98,7 +98,8 @@ struct TimelineBlock: Identifiable {
 }
 
 final class ScheduleViewModel: ObservableObject {
-    static let blockMinutes = 15
+    static let blockMinutes = 5
+    static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
     @Published var categories: [TaskCategory]
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]

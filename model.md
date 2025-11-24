@@ -13,7 +13,7 @@
 - **Fields**
   - `id: UUID`
   - `categoryID: UUID` – Links to `TaskCategory`.
-  - `startIndex: Int` – Slot index (15‑minute increments) since `dayStart`.
+  - `startIndex: Int` – Slot index (5‑minute increments) since `dayStart`.
   - `duration: Int` – Number of slots (minimum 1).
   - `isCompleted: Bool` – New flag toggled from the check button inside each card.
   - `focusID: UUID?` – Optional link to a `FocusItem` currently embedded in the box.
@@ -40,7 +40,7 @@
   - On app launch we compare the last stored `wakeUpKey` with the current day. If the calendar day changed we archive the previous day’s tasks into a new `ScheduleDayLog` entry before clearing the schedule for the new day.
 
 ## Daily time window
-- Each schedule “day” runs from **04:45** local time to **00:00** (midnight) of the following calendar day. The `wakeUpKey` stores the 04:45 anchor to detect day changes and ensure all 15‑minute blocks are generated within that window.
+- Each schedule “day” runs from **04:45** local time to **00:00** (midnight) of the following calendar day. The `wakeUpKey` stores the 04:45 anchor to detect day changes and ensure all 5‑minute blocks are generated within that window.
 
 ## Persistence Keys
 - `agenda.categories.storage` → `[TaskCategory]`
@@ -60,8 +60,8 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
 - **Duration helpers**:
   - `resize(task:newDuration:)` resizes a task provided the enlarged interval is still free.
   - `adjustTaskDuration(for:by:)` clamps the requested delta between 1 block and the remaining space of the day, then delegates to `resize`.
-  - `adjustTaskEndTime(for:to:)` lets callers specify the exact end `Date` (rounded up to the next 15‑minute block and never extending beyond the current duration).
-  - `finishTask(_:at:)` is a convenience that forwards the current time to `adjustTaskEndTime`.
+  - `adjustTaskEndTime(for:to:)` lets callers specify the exact end `Date` (redondeada al siguiente bloque de 5 minutos y sin sobrepasar la duración actual).
+  - `finishTask(_:at:)` es un atajo que pasa la hora actual a `adjustTaskEndTime`.
 - **Focus helpers**:
   - `addFocus`, `updateFocus`, `deleteFocus` manage the standalone focus backlog.
   - `assignFocus(_:to:)` embeds or removes a focus from a task, keeping both sides synchronized and clearing `isFocusIndeterminate`.
@@ -74,7 +74,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
 - `AgendaTests/ScheduleViewModelTests.swift` covers:
   - `adjustTaskDuration` clamping to at least one block and not exceeding the day.
   - `adjustTaskPosition` moving freely or shifting downstream groups when needed.
-  - `finishTask` rounding the task’s end time to the current 15‑minute slot.
+  - `finishTask` rounding the task’s end time to the current 5‑minute slot.
   - `adjustTaskEndTime` honoring explicit end hours and the focus assignment lifecycle (`testFocusLifecycleAssignAndDetach`, `testFocusIndeterminateState`).
 - Run them from Xcode (Product → Test) or via CLI:
   ```

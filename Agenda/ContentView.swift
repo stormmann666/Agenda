@@ -262,7 +262,9 @@ struct DayTimelineView: View {
                                })
             }
         } else {
-            EmptySlot(height: height)
+            let blocksPerHour = ScheduleViewModel.blocksPerHour
+            let isAlternate = ((block.index / blocksPerHour) % 2 == 1)
+            EmptySlot(height: height, isAlternateHour: isAlternate)
                 .onTapGesture {
                     selectedBlockIndex = block.index
                     showCategoryPicker = true
@@ -575,12 +577,17 @@ struct LiveStatusBar: View {
 
 struct EmptySlot: View {
     let height: CGFloat
+    let isAlternateHour: Bool
 
     var body: some View {
         RoundedRectangle(cornerRadius: 12)
-            .stroke(style: StrokeStyle(lineWidth: 1, dash: [6]))
+            .fill(slotBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [6]))
+                    .foregroundColor(.secondary.opacity(0.3))
+            )
             .frame(height: height)
-            .foregroundColor(.secondary.opacity(0.3))
             .overlay(
                 Text("Toque para asignar")
                     .font(.caption)
@@ -588,6 +595,10 @@ struct EmptySlot: View {
                     .allowsHitTesting(false)
             )
             .contentShape(Rectangle())
+    }
+
+    private var slotBackground: Color {
+        isAlternateHour ? Color.secondary.opacity(0.08) : Color.secondary.opacity(0.03)
     }
 }
 
