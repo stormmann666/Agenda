@@ -139,12 +139,6 @@ struct DayTimelineView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button {
-                        togglePause()
-                    } label: {
-                        Image(systemName: isPaused ? "play.circle" : "pause.circle")
-                    }
-
-                    Button {
                         isClearingAllTasks = true
                     } label: {
                         Image(systemName: "trash")
@@ -386,35 +380,7 @@ struct DayTimelineView: View {
         }
     }
 
-    private func togglePause() {
-        if isPaused {
-            isPaused = false
-            pauseReferenceDate = nil
-            pauseTaskID = nil
-            pauseAccumulatedBlocks = 0
-        } else {
-            isPaused = true
-            pauseReferenceDate = liveTime
-            pauseAccumulatedBlocks = 0
-            pauseTaskID = currentTask(at: liveTime)?.id
-        }
-    }
-
-    private func handlePauseProgress(at currentDate: Date) {
-        guard isPaused,
-              let reference = pauseReferenceDate,
-              let taskID = pauseTaskID,
-              let task = viewModel.task(with: taskID) else {
-            return
-        }
-        let blockSeconds = Double(ScheduleViewModel.blockMinutes * 60)
-        let elapsed = max(0, currentDate.timeIntervalSince(reference))
-        let totalBlocks = Int(elapsed / blockSeconds)
-        guard totalBlocks > pauseAccumulatedBlocks else { return }
-        let delta = totalBlocks - pauseAccumulatedBlocks
-        viewModel.shiftTasks(from: task.startIndex, by: delta)
-        pauseAccumulatedBlocks += delta
-    }
+    private func handlePauseProgress(at currentDate: Date) { }
 
     private func currentTask(at date: Date) -> TaskItem? {
         let blocks = viewModel.timelineBlocks()
