@@ -218,13 +218,14 @@ struct DayTimelineView: View {
                             Button {
                                 toggleFocusState(for: task)
                             } label: {
-                                Image(systemName: task.isFocusIndeterminate ? "target" : "target")
+                                let color = focusIndicatorColor(for: task)
+                                Image(systemName: "target")
                                     .font(.headline)
-                                    .foregroundColor(task.isFocusIndeterminate ? .blue : .gray)
+                                    .foregroundColor(color)
                                     .padding(6)
                                     .overlay(
                                         Circle()
-                                            .stroke(task.isFocusIndeterminate ? Color.blue : Color.gray.opacity(0.4), lineWidth: 1)
+                                            .stroke(color.opacity(0.6), lineWidth: 1)
                                     )
                             }
                             .buttonStyle(.plain)
@@ -326,6 +327,16 @@ struct DayTimelineView: View {
         } else {
             viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
         }
+    }
+
+    private func focusIndicatorColor(for task: TaskItem) -> Color {
+        if task.focusID != nil {
+            return Color.red
+        }
+        if task.isFocusIndeterminate {
+            return Color.blue.opacity(0.7)
+        }
+        return Color.gray.opacity(0.7)
     }
 
     private func liveStatusInfo(for task: TaskItem) -> LiveStatusInfo? {
