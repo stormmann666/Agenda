@@ -112,6 +112,8 @@ final class ScheduleViewModel: ObservableObject {
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
     private let dayLogsKey = "agenda.dayLogs.storage"
+    private let blockVersionKey = "agenda.blockMinutes.version"
+    private let legacyBlockMinutes = 15
     private let focusesKey = "agenda.focuses.storage"
     private var calendar: Calendar
     private let defaults: UserDefaults
@@ -143,8 +145,31 @@ final class ScheduleViewModel: ObservableObject {
 
         categories = loadCategories()
         focuses = loadFocuses()
-        let loadedTasks = loadTasks()
-        dayLogs = loadDayLogs()
+        var loadedTasks = loadTasks()
+        var loadedLogs = loadDayLogs()
+
+        let storedBlockVersion: Int
+        if defaults.object(forKey: blockVersionKey) == nil {
+            storedBlockVersion = legacyBlockMinutes
+        } else {
+            let value = defaults.integer(forKey: blockVersionKey)
+            storedBlockVersion = value == 0 ? Self.blockMinutes : value
+        }
+
+        if storedBlockVersion != Self.blockMinutes {
+            loadedTasks = convert(tasks: loadedTasks, from: storedBlockVersion, to: Self.blockMinutes, clampToDay: true)
+            loadedLogs = loadedLogs.map { log in
+                let converted = convert(tasks: log.tasks, from: storedBlockVersion, to: Self.blockMinutes, clampToDay: false)
+                return ScheduleDayLog(id: log.id, date: log.date, tasks: converted)
+            }
+            if let data = try? JSONEncoder().encode(loadedTasks) {
+                defaults.set(data, forKey: tasksKey)
+            }
+            if let data = try? JSONEncoder().encode(loadedLogs) {
+                defaults.set(data, forKey: dayLogsKey)
+            }
+        }
+        defaults.set(Self.blockMinutes, forKey: blockVersionKey)
 
         if let previousDayStart {
             archiveDay(date: previousDayStart, tasks: loadedTasks)
@@ -153,6 +178,7 @@ final class ScheduleViewModel: ObservableObject {
         } else {
             tasks = loadedTasks
         }
+        dayLogs = loadedLogs
         cleanupFocusAssignments()
     }
 
@@ -580,6 +606,29 @@ final class ScheduleViewModel: ObservableObject {
             focuses = updated
             saveFocuses()
         }
+    }
+
+    private func convert(tasks: [TaskItem], from oldMinutes: Int, to newMinutes: Int, clampToDay: Bool) -> [TaskItem] {
+        guard oldMinutes > 0, newMinutes > 0, oldMinutes != newMinutes else { return tasks }
+        var converted = tasks.map { task -> TaskItem in
+            var updated = task
+            let startMinutes = task.startIndex * oldMinutes
+            let durationMinutes = task.duration * oldMinutes
+            updated.startIndex = max(0, Int(floor(Double(startMinutes) / Double(newMinutes))))
+            updated.duration = max(1, Int(ceil(Double(durationMinutes) / Double(newMinutes))))
+            return updated
+        }
+        if clampToDay {
+            let maxStart = max(0, totalBlocks - 1)
+            for index in converted.indices {
+                converted[index].startIndex = min(converted[index].startIndex, maxStart)
+                if converted[index].startIndex + converted[index].duration > totalBlocks {
+                    converted[index].duration = max(1, totalBlocks - converted[index].startIndex)
+                }
+            }
+        }
+        converted.sort { $0.startIndex < $1.startIndex }
+        return converted
     }
 
     private func archiveDay(date: Date, tasks: [TaskItem]) {
