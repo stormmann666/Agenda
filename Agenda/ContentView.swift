@@ -50,6 +50,7 @@ struct DayTimelineView: View {
     @State private var pauseReferenceDate: Date?
     @State private var pauseTaskID: UUID?
     @State private var pauseAccumulatedBlocks: Int = 0
+    @State private var timelineRefreshID = UUID()
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -71,6 +72,7 @@ struct DayTimelineView: View {
                         }
                     }
                     .padding(.horizontal)
+                    .id(timelineRefreshID)
                 }
                 .onAppear {
                     proxy.scrollTo(currentAnchorIndex, anchor: .top)
@@ -214,6 +216,20 @@ struct DayTimelineView: View {
                             .buttonStyle(.plain)
 
                             Button {
+                                toggleFocusState(for: task)
+                            } label: {
+                                Image(systemName: task.isFocusIndeterminate ? "target" : "target")
+                                    .font(.headline)
+                                    .foregroundColor(task.isFocusIndeterminate ? .blue : .gray)
+                                    .padding(6)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(task.isFocusIndeterminate ? Color.blue : Color.gray.opacity(0.4), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
                                 taskPendingDeletion = task
                             } label: {
                                 Image(systemName: "trash")
@@ -296,17 +312,20 @@ struct DayTimelineView: View {
     }
 
     private func finishTaskNow(_ task: TaskItem) {
-        let now = liveTime
-        let blockSeconds = Double(ScheduleViewModel.blockMinutes) * 60
-        let elapsed = now.timeIntervalSince(viewModel.dayStart)
-        guard elapsed >= 0 else { return }
-        let computedEndIndex = Int(ceil(elapsed / blockSeconds))
-        let clampedEndIndex = min(viewModel.totalBlocks, computedEndIndex)
-        guard clampedEndIndex > task.startIndex else { return }
-        let desiredEndIndex = min(viewModel.totalBlocks, max(task.startIndex + 1, clampedEndIndex))
-        let newDuration = desiredEndIndex - task.startIndex
-        guard newDuration < task.duration else { return }
-        viewModel.resize(task: task, newDuration: newDuration)
+        let now = Date()
+        liveTime = now
+        withAnimation {
+            viewModel.finishTask(task, at: now)
+            timelineRefreshID = UUID()
+        }
+    }
+
+    private func toggleFocusState(for task: TaskItem) {
+        if task.isFocusIndeterminate {
+            viewModel.setTaskFocusIndeterminate(task, isIndeterminate: false)
+        } else {
+            viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
+        }
     }
 
     private func liveStatusInfo(for task: TaskItem) -> LiveStatusInfo? {
