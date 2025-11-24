@@ -287,6 +287,7 @@ final class ScheduleViewModel: ObservableObject {
         mutateTasks { tasks in
             for index in tasks.indices where tasks[index].focusID == focus.id {
                 tasks[index].focusID = nil
+                tasks[index].isFocusIndeterminate = false
             }
         }
     }
@@ -313,6 +314,22 @@ final class ScheduleViewModel: ObservableObject {
         mutateFocuses { focuses in
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             focuses[index].assignedTaskID = targetID
+        }
+    }
+
+    func clearFocus(for task: TaskItem) {
+        var removedFocusID: UUID?
+        update(taskID: task.id) { mutable in
+            removedFocusID = mutable.focusID
+            mutable.focusID = nil
+            mutable.isFocusIndeterminate = false
+        }
+        if let focusID = removedFocusID {
+            mutateFocuses { focuses in
+                if let index = focuses.firstIndex(where: { $0.id == focusID }) {
+                    focuses[index].assignedTaskID = nil
+                }
+            }
         }
     }
 

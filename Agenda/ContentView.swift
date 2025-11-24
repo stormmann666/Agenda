@@ -92,11 +92,7 @@ struct DayTimelineView: View {
                 }
             }
             .sheet(item: $editingTask) { task in
-                CategoryPickerSheet(title: "Editar tarea",
-                                    categories: viewModel.categories,
-                                    selectedID: task.categoryID) { category in
-                    viewModel.setCategory(category, for: task)
-                }
+                TaskEditorSheet(viewModel: viewModel, taskID: task.id)
             }
             .alert(scheduleError ?? "", isPresented: Binding(
                 get: { scheduleError != nil },
@@ -171,6 +167,8 @@ struct DayTimelineView: View {
             let isSelected = selectedTaskID == task.id
             let isCompleted = task.isCompleted
             let liveStatus = liveStatusInfo(for: task)
+            let focusLabel = focusDisplayLabel(for: task)
+            let isFocusIndeterminate = task.isFocusIndeterminate
 
             HStack(spacing: 8) {
                 VStack(spacing: 4) {
@@ -184,7 +182,9 @@ struct DayTimelineView: View {
                                      isMoveModeActive: isMoveMode,
                                      isSelected: isSelected,
                                      isCompleted: isCompleted,
-                                     liveStatus: liveStatus)
+                                     liveStatus: liveStatus,
+                                     focusLabel: focusLabel,
+                                     isFocusIndeterminate: isFocusIndeterminate)
                             .contentShape(Rectangle())
                             .contextMenu {
                                 Button {
@@ -321,6 +321,17 @@ struct DayTimelineView: View {
         return LiveStatusInfo(remainingMinutes: minutes, fraction: fraction)
     }
 
+    private func focusDisplayLabel(for task: TaskItem) -> String? {
+        guard let focusID = task.focusID,
+              let focus = viewModel.focus(with: focusID) else {
+            return nil
+        }
+        if let firstLine = focus.name.split(separator: "\n").first {
+            return String(firstLine)
+        }
+        return focus.name
+    }
+
     private func togglePause() {
         if isPaused {
             isPaused = false
@@ -407,6 +418,8 @@ struct TaskCardView: View {
     let isSelected: Bool
     let isCompleted: Bool
     let liveStatus: LiveStatusInfo?
+    let focusLabel: String?
+    let isFocusIndeterminate: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -430,6 +443,15 @@ struct TaskCardView: View {
                         .font(.caption)
                         .foregroundColor(.yellow)
                 }
+            }
+            if let focusLabel {
+                Text("Focus: \(focusLabel)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            } else if isFocusIndeterminate {
+                Text("Focus pendiente")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
         .padding()
@@ -811,19 +833,26 @@ struct FocusManagerView: View {
                             Button("Cancelar") {
                                 showingAddFocus = false
                                 newFocusName = ""
+                                focusFieldFocused = false
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Guardar") {
-                                viewModel.addFocus(name: newFocusName)
+                                let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                viewModel.addFocus(name: trimmed)
                                 newFocusName = ""
                                 showingAddFocus = false
+                                focusFieldFocused = false
                             }
                             .disabled(newFocusName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                 }
                 .presentationDetents([.medium])
+                .onDisappear {
+                    focusFieldFocused = false
+                    newFocusName = ""
+                }
             }
         }
     }
@@ -832,6 +861,101 @@ struct FocusManagerView: View {
         for index in offsets {
             let focus = viewModel.focuses[index]
             viewModel.deleteFocus(focus)
+        }
+    }
+}
+
+struct TaskEditorSheet: View {
+    @ObservedObject var viewModel: ScheduleViewModel
+    let taskID: UUID
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            if let task = viewModel.task(with: taskID) {
+                Form {
+                    focusSection(for: task)
+                }
+                .navigationTitle("Focus del box")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Cerrar") {
+                            dismiss()
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView("Tarea no encontrada",
+                                       systemImage: "exclamationmark.triangle",
+                                       description: Text("Esta tarea ya no está disponible."))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func focusSection(for task: TaskItem) -> some View {
+        Section("Focus") {
+            Button {
+                viewModel.clearFocus(for: task)
+            } label: {
+                HStack {
+                    Text("Sin focus")
+                    Spacer()
+                    if task.focusID == nil && !task.isFocusIndeterminate {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.accentColor)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
+            } label: {
+                HStack {
+                    Text("Focus indeterminado")
+                    Spacer()
+                    if task.isFocusIndeterminate {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.accentColor)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if viewModel.focuses.isEmpty {
+                Text("Añade focuses desde la pestaña Focuses para asignarlos aquí.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.focuses) { focus in
+                    Button {
+                        viewModel.assignFocus(focus, to: task)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(focus.name)
+                                Spacer()
+                                if task.focusID == focus.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                            if let assignedTaskID = focus.assignedTaskID,
+                               assignedTaskID != task.id {
+                                Text("Asignada a otra tarea (se moverá aquí)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if task.focusID == focus.id {
+                                Text("Usando este focus")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }
