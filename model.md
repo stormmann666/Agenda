@@ -66,7 +66,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `addFocus`, `updateFocus`, `deleteFocus` manage the standalone focus backlog.
   - `assignFocus(_:to:)` embeds or removes a focus from a task, keeping both sides synchronized and clearing `isFocusIndeterminate`.
   - `clearFocus(for:)` removes any associated focus from a task and frees the focus for later use.
-  - `setTaskFocusIndeterminate(_:isIndeterminate:)` toggles the “focused but undecided” state that clears `focusID` while keeping the box marked as focused.
+  - `setTaskFocusIndeterminate(_:isIndeterminate:)` toggles the “focused pero indefinido” state y, cuando pasa a indeterminado, libera al focus para que otros boxes puedan tomarlo.
   - Focus persistence stays consistent through `mutateTasks` calling `cleanupFocusAssignments()` so any dangling assignments are automatically cleared when tasks disappear.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
