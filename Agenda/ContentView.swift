@@ -51,6 +51,7 @@ struct DayTimelineView: View {
     @State private var pauseTaskID: UUID?
     @State private var pauseAccumulatedBlocks: Int = 0
     @State private var timelineRefreshID = UUID()
+    @State private var scrollProxy: ScrollViewProxy?
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -81,8 +82,15 @@ struct DayTimelineView: View {
                     .id(timelineRefreshID)
                 }
                 .onAppear {
-                    proxy.scrollTo(currentAnchorIndex, anchor: .top)
+                    scrollProxy = proxy
+                    scrollToCurrentHour(animated: false)
                 }
+                .onChange(of: timelineRefreshID) { _ in
+                    scrollToCurrentHour(animated: false)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                scrollToCurrentHour(animated: false)
             }
             .onReceive(liveTimer) { date in
                 liveTime = date
@@ -137,7 +145,14 @@ struct DayTimelineView: View {
                 Button("Cancelar", role: .cancel) { }
             }
             .toolbar {
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        scrollToCurrentHour(animated: true)
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         isClearingAllTasks = true
                     } label: {
@@ -420,6 +435,18 @@ struct DayTimelineView: View {
             return Color(red: 0.3, green: 0.5, blue: 0.8).opacity(0.55)
         } else {
             return Color(red: 0.8, green: 0.6, blue: 0.3).opacity(0.55)
+        }
+    }
+
+    private func scrollToCurrentHour(animated: Bool) {
+        guard let proxy = scrollProxy else { return }
+        let target = currentAnchorIndex
+        if animated {
+            withAnimation {
+                proxy.scrollTo(target, anchor: .top)
+            }
+        } else {
+            proxy.scrollTo(target, anchor: .top)
         }
     }
 
