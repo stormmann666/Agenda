@@ -161,12 +161,15 @@ struct DayTimelineView: View {
     @ViewBuilder
     private func blockContent(for block: TimelineBlock) -> some View {
         let height = blockHeight * CGFloat(block.span)
-        if let task = block.task, let category = viewModel.category(for: task.categoryID) {
-            let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
-            let taskHeight = blockHeight * CGFloat(displayDuration)
-            let isDragging = draggingTaskID == task.id
-            let isMoveMode = moveModeTaskID == task.id
-            let isSelected = selectedTaskID == task.id
+        let liveLineOffset = liveIndicatorOffset(for: block)
+
+        ZStack(alignment: .topLeading) {
+            if let task = block.task, let category = viewModel.category(for: task.categoryID) {
+                let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
+                let taskHeight = blockHeight * CGFloat(displayDuration)
+                let isDragging = draggingTaskID == task.id
+                let isMoveMode = moveModeTaskID == task.id
+                let isSelected = selectedTaskID == task.id
             let isCompleted = task.isCompleted
             let liveStatus = liveStatusInfo(for: task)
             let focusLabel = focusDisplayLabel(for: task)
@@ -264,11 +267,30 @@ struct DayTimelineView: View {
         } else {
             let hourNumber = viewModel.hourNumber(for: block.index)
             let strokeColor = hourStrokeColor(forHour: hourNumber)
-            EmptySlot(height: height, strokeColor: strokeColor)
-                .onTapGesture {
-                    selectedBlockIndex = block.index
-                    showCategoryPicker = true
+                    EmptySlot(height: height, strokeColor: strokeColor)
+                        .onTapGesture {
+                            selectedBlockIndex = block.index
+                            showCategoryPicker = true
+                        }
+            }
+
+            if let liveLineOffset {
+                HStack(spacing: 8) {
+                    Text(liveIndicatorLabel)
+                        .font(.caption2)
+                        .foregroundColor(liveLineColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.systemBackground).opacity(0.85))
+                        .clipShape(Capsule())
+                    Rectangle()
+                        .fill(liveLineColor)
+                        .frame(height: 2)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(x: -48)
+                .offset(y: liveLineOffset - 1)
+            }
         }
     }
 
@@ -362,6 +384,27 @@ struct DayTimelineView: View {
             return String(firstLine)
         }
         return focus.name
+    }
+
+    private func liveIndicatorOffset(for block: TimelineBlock) -> CGFloat? {
+        let blockStart = block.startDate
+        let blockEnd = viewModel.date(for: block.index + block.span)
+        guard liveTime >= blockStart, liveTime < blockEnd else { return nil }
+        let total = blockEnd.timeIntervalSince(blockStart)
+        guard total > 0 else { return nil }
+        let elapsed = liveTime.timeIntervalSince(blockStart)
+        let fraction = max(0, min(1, elapsed / total))
+        return CGFloat(fraction) * blockHeight * CGFloat(block.span)
+    }
+
+    private var liveLineColor: Color {
+        Color(red: 0.15, green: 0.7, blue: 0.45)
+    }
+
+    private var liveIndicatorLabel: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: liveTime)
     }
 
     private func hourRangeLabel(for index: Int) -> String {
