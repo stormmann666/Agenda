@@ -21,6 +21,10 @@ struct ContentView: View {
                 .tabItem {
                     Label("Tipos", systemImage: "slider.horizontal.3")
                 }
+            FocusManagerView(viewModel: viewModel)
+                .tabItem {
+                    Label("Focuses", systemImage: "target")
+                }
         }
     }
 }
@@ -743,5 +747,91 @@ private extension Color {
                abs(lGreen - rGreen) < 0.02 &&
                abs(lBlue - rBlue) < 0.02 &&
                abs(lAlpha - rAlpha) < 0.02
+    }
+}
+
+struct FocusManagerView: View {
+    @ObservedObject var viewModel: ScheduleViewModel
+    @State private var showingAddFocus = false
+    @State private var newFocusName: String = ""
+    @FocusState private var focusFieldFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if viewModel.focuses.isEmpty {
+                    ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
+                } else {
+                    ForEach(viewModel.focuses) { focus in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(focus.name)
+                                .font(.headline)
+                            if let taskID = focus.assignedTaskID,
+                               let task = viewModel.task(with: taskID),
+                               let category = viewModel.category(for: task.categoryID) {
+                                Text("Asignada a \(category.name)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Sin asignar")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete(perform: deleteFocuses)
+                }
+            }
+            .navigationTitle("Focuses")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingAddFocus = true
+                    } label: {
+                        Label("Nuevo focus", systemImage: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingAddFocus) {
+                NavigationStack {
+                    Form {
+                        Section("Descripción") {
+                            TextField("Descripción del focus", text: $newFocusName)
+                                .focused($focusFieldFocused)
+                        }
+                    }
+                    .navigationTitle("Nuevo focus")
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            focusFieldFocused = true
+                        }
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") {
+                                showingAddFocus = false
+                                newFocusName = ""
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Guardar") {
+                                viewModel.addFocus(name: newFocusName)
+                                newFocusName = ""
+                                showingAddFocus = false
+                            }
+                            .disabled(newFocusName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
+        }
+    }
+
+    private func deleteFocuses(at offsets: IndexSet) {
+        for index in offsets {
+            let focus = viewModel.focuses[index]
+            viewModel.deleteFocus(focus)
+        }
     }
 }
