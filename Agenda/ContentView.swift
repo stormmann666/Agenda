@@ -58,9 +58,10 @@ struct DayTimelineView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(viewModel.timelineBlocks()) { block in
-                            let blocksPerHour = ScheduleViewModel.blocksPerHour
-                            if block.index % blocksPerHour == 0 {
+                        let blocks = viewModel.timelineBlocks()
+                        ForEach(blocks) { block in
+                            let isHourStart = viewModel.isHourBoundaryBlock(index: block.index)
+                            if isHourStart {
                                 HourMarkerView(label: hourRangeLabel(for: block.index))
                                     .padding(.bottom, 2)
                             }
@@ -267,9 +268,9 @@ struct DayTimelineView: View {
                                })
             }
         } else {
-            let blocksPerHour = ScheduleViewModel.blocksPerHour
-            let isAlternate = ((block.index / blocksPerHour) % 2 == 1)
-            EmptySlot(height: height, strokeColor: hourStrokeColor(isAlternateHour: isAlternate))
+            let hourNumber = viewModel.hourNumber(for: block.index)
+            let strokeColor = hourStrokeColor(forHour: hourNumber)
+            EmptySlot(height: height, strokeColor: strokeColor)
                 .onTapGesture {
                     selectedBlockIndex = block.index
                     showCategoryPicker = true
@@ -377,11 +378,11 @@ struct DayTimelineView: View {
         return "\(String(format: "%02d", startHour)) - \(String(format: "%02d", endHour)) h"
     }
 
-    private func hourStrokeColor(isAlternateHour: Bool) -> Color {
-        if isAlternateHour {
-            return Color(red: 0.3, green: 0.5, blue: 0.8).opacity(0.5)
+    private func hourStrokeColor(forHour hour: Int) -> Color {
+        if hour % 2 == 0 {
+            return Color(red: 0.3, green: 0.5, blue: 0.8).opacity(0.55)
         } else {
-            return Color(red: 0.8, green: 0.6, blue: 0.3).opacity(0.5)
+            return Color(red: 0.8, green: 0.6, blue: 0.3).opacity(0.55)
         }
     }
 

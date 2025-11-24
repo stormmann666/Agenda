@@ -220,6 +220,21 @@ final class ScheduleViewModel: ObservableObject {
         categories.first { $0.id == id }
     }
 
+    func isHourBoundaryBlock(index: Int) -> Bool {
+        let blockMinutes = Self.blockMinutes
+        guard blockMinutes > 0 else { return false }
+        let minutesFromStart = index * blockMinutes
+        let targetDate = dayStart.addingTimeInterval(Double(minutesFromStart * 60))
+        let minute = calendar.component(.minute, from: targetDate)
+        return minute == 0
+    }
+
+    func hourNumber(for index: Int) -> Int {
+        let minutesFromStart = index * Self.blockMinutes
+        let targetDate = dayStart.addingTimeInterval(Double(minutesFromStart * 60))
+        return calendar.component(.hour, from: targetDate)
+    }
+
     @discardableResult
     func addTask(at index: Int, category: TaskCategory) -> TaskItem? {
         let newTask = TaskItem(categoryID: category.id, startIndex: index, duration: 1)
