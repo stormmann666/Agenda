@@ -118,6 +118,7 @@ final class ScheduleViewModel: ObservableObject {
     private let focusesKey = "agenda.focuses.storage"
     private var calendar: Calendar
     private let defaults: UserDefaults
+    private let fallbackDefaults = UserDefaults.standard
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current) {
@@ -144,6 +145,8 @@ final class ScheduleViewModel: ObservableObject {
 
         let nextMidnight = self.calendar.startOfDay(for: self.calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
         dayEnd = nextMidnight
+
+        migrateLegacyDataIfNeeded()
 
         categories = loadCategories()
         focuses = loadFocuses()
@@ -662,6 +665,24 @@ final class ScheduleViewModel: ObservableObject {
         }
         converted.sort { $0.startIndex < $1.startIndex }
         return converted
+    }
+
+    private func migrateLegacyDataIfNeeded() {
+        guard defaults !== fallbackDefaults else { return }
+
+        func copyIfNeeded(key: String) {
+            if defaults.object(forKey: key) == nil,
+               let value = fallbackDefaults.object(forKey: key) {
+                defaults.set(value, forKey: key)
+            }
+        }
+
+        copyIfNeeded(key: tasksKey)
+        copyIfNeeded(key: categoriesKey)
+        copyIfNeeded(key: dayLogsKey)
+        copyIfNeeded(key: focusesKey)
+        copyIfNeeded(key: wakeUpKey)
+        copyIfNeeded(key: blockVersionKey)
     }
 
     private func archiveDay(date: Date, tasks: [TaskItem]) {
