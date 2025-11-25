@@ -105,8 +105,8 @@ final class ScheduleViewModel: ObservableObject {
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
 
-    let dayStart: Date
-    let dayEnd: Date
+    var dayStart: Date
+    var dayEnd: Date
 
     private let wakeUpKey = "agenda.wakeUpAnchor"
     private let tasksKey = "agenda.tasks.storage"
@@ -233,6 +233,22 @@ final class ScheduleViewModel: ObservableObject {
         let minutesFromStart = index * Self.blockMinutes
         let targetDate = dayStart.addingTimeInterval(Double(minutesFromStart * 60))
         return calendar.component(.hour, from: targetDate)
+    }
+
+    func endCurrentDay() {
+        let snapshot = tasks
+        archiveDay(date: dayStart, tasks: snapshot)
+        mutateTasks { tasks in
+            tasks.removeAll()
+        }
+        cleanupFocusAssignments()
+
+        if let nextStart = calendar.date(byAdding: .day, value: 1, to: dayStart) {
+            dayStart = nextStart
+        }
+        let nextMidnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+        dayEnd = nextMidnight
+        defaults.set(dayStart, forKey: wakeUpKey)
     }
 
     @discardableResult
