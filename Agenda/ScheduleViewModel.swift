@@ -100,6 +100,7 @@ struct TimelineBlock: Identifiable {
 final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 5
     static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
+    private static let appGroupID = "group.com.antoniomunoz.Agenda"
     @Published var categories: [TaskCategory]
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]
@@ -118,7 +119,8 @@ final class ScheduleViewModel: ObservableObject {
     private var calendar: Calendar
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard, calendar: Calendar = Calendar.current) {
+    init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
+         calendar: Calendar = Calendar.current) {
         var normalizedCalendar = calendar
         normalizedCalendar.timeZone = TimeZone.current
         self.calendar = normalizedCalendar
