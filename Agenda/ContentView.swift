@@ -893,12 +893,19 @@ struct FocusManagerView: View {
     var body: some View {
         NavigationStack {
             List {
-                if viewModel.focuses.isEmpty {
-                    ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
+                if filteredFocuses.isEmpty {
+                    ContentUnavailableView("No hay focuses pendientes", systemImage: "target", description: Text("Marca o añade nuevos focuses para verlos aquí."))
                 } else {
-                    ForEach(viewModel.focuses) { focus in
+                    ForEach(filteredFocuses) { focus in
                         let indicatorColor = focusColor(for: focus)
                         HStack(spacing: 12) {
+                            Button {
+                                viewModel.completeFocus(focus)
+                            } label: {
+                                Image(systemName: "circle")
+                                    .foregroundColor(.gray)
+                            }
+                            .buttonStyle(.plain)
                             Circle()
                                 .fill(indicatorColor)
                                 .frame(width: 14, height: 14)
@@ -911,6 +918,7 @@ struct FocusManagerView: View {
                                 Text(estimationLabel(for: focus))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                progressBar(for: focus)
                                 if let taskID = focus.assignedTaskID,
                                    let task = viewModel.task(with: taskID),
                                    let category = viewModel.category(for: task.categoryID) {
@@ -1025,6 +1033,12 @@ struct FocusManagerView: View {
         }
     }
 
+    private var filteredFocuses: [FocusItem] {
+        viewModel.focuses.filter { focus in
+            !(focus.isCompleted ?? false)
+        }
+    }
+
     private func focusColor(for focus: FocusItem) -> Color {
         if let taskID = focus.assignedTaskID,
            let task = viewModel.task(with: taskID),
@@ -1049,6 +1063,21 @@ struct FocusManagerView: View {
             return "Estimado: \(expectedHours) h\(actualText)"
         } else {
             return "Sin estimación\(actualText)"
+        }
+    }
+
+    @ViewBuilder
+    private func progressBar(for focus: FocusItem) -> some View {
+        let actual = focus.actualMinutes ?? 0
+        if let expected = focus.expectedMinutes, expected > 0 {
+            ProgressView(value: min(Double(actual) / Double(expected), 1.0))
+                .tint(.blue)
+        } else if actual > 0 {
+            ProgressView(value: min(Double(actual) / Double(max(actual, 1)), 1.0))
+                .tint(.green)
+        } else {
+            ProgressView(value: 0)
+                .tint(.gray)
         }
     }
 }
