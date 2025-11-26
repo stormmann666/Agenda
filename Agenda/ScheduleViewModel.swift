@@ -82,17 +82,20 @@ struct FocusItem: Identifiable, Codable, Hashable {
     var assignedTaskID: UUID?
     var expectedMinutes: Int?
     var actualMinutes: Int?
+    var isCompleted: Bool?
 
     init(id: UUID = UUID(),
          name: String,
          assignedTaskID: UUID? = nil,
          expectedMinutes: Int? = nil,
-         actualMinutes: Int? = nil) {
+         actualMinutes: Int? = nil,
+         isCompleted: Bool? = nil) {
         self.id = id
         self.name = name
         self.assignedTaskID = assignedTaskID
         self.expectedMinutes = expectedMinutes
         self.actualMinutes = actualMinutes
+        self.isCompleted = isCompleted
     }
 }
 
@@ -342,18 +345,13 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func addFocus(name: String, expectedMinutes: Int? = nil, actualMinutes: Int? = nil) -> FocusItem {
-        let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name)
+        let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name,
+                                 expectedMinutes: expectedMinutes,
+                                 actualMinutes: actualMinutes)
         mutateFocuses { focuses in
-            var focus = newFocus
-            focus.expectedMinutes = expectedMinutes
-            focus.actualMinutes = actualMinutes
-            focuses.append(focus)
+            focuses.append(newFocus)
         }
-        return FocusItem(id: newFocus.id,
-                         name: newFocus.name,
-                         assignedTaskID: nil,
-                         expectedMinutes: expectedMinutes,
-                         actualMinutes: actualMinutes)
+        return newFocus
     }
 
     func updateFocus(_ focus: FocusItem) {
@@ -406,6 +404,13 @@ final class ScheduleViewModel: ObservableObject {
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             let current = focuses[index].actualMinutes ?? 0
             focuses[index].actualMinutes = current + minutes
+        }
+    }
+
+    func completeFocus(_ focus: FocusItem) {
+        mutateFocuses { focuses in
+            guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
+            focuses[index].isCompleted = true
         }
     }
 
