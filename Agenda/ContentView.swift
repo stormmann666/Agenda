@@ -894,8 +894,8 @@ struct FocusManagerView: View {
                     ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
                 } else {
                     ForEach(viewModel.focuses) { focus in
+                        let indicatorColor = focusColor(for: focus)
                         HStack(spacing: 12) {
-                            let indicatorColor = focusColor(for: focus)
                             Circle()
                                 .fill(indicatorColor)
                                 .frame(width: 14, height: 14)
@@ -919,6 +919,8 @@ struct FocusManagerView: View {
                                 }
                             }
                         }
+                        .padding(.vertical, 6)
+                        .listRowBackground(indicatorColor.opacity(0.12))
                     }
                     .onDelete(perform: deleteFocuses)
                 }
