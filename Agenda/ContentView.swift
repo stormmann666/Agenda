@@ -985,9 +985,7 @@ struct FocusManagerView: View {
                     }
                     .navigationTitle("Nuevo focus")
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            focusFieldFocused = true
-                        }
+                        focusFieldFocused = true
                     }
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
