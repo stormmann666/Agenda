@@ -893,11 +893,11 @@ struct FocusManagerView: View {
                 if viewModel.focuses.isEmpty {
                     ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
                 } else {
-                    ForEach(viewModel.focuses) { focus in
-                        let indicatorColor = focusColor(for: focus)
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(indicatorColor)
+            ForEach(viewModel.focuses) { focus in
+                let indicatorColor = focusColor(for: focus)
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(indicatorColor)
                                 .frame(width: 14, height: 14)
                                 .overlay(
                                     Circle()
@@ -906,6 +906,11 @@ struct FocusManagerView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(focus.name)
                                     .font(.headline)
+                                if let minutes = focus.expectedMinutes {
+                                    Text("Estimado: \(minutes) min")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                                 if let taskID = focus.assignedTaskID,
                                    let task = viewModel.task(with: taskID),
                                    let category = viewModel.category(for: task.categoryID) {

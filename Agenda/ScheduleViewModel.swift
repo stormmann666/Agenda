@@ -80,11 +80,13 @@ struct FocusItem: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var assignedTaskID: UUID?
+    var expectedMinutes: Int?
 
-    init(id: UUID = UUID(), name: String, assignedTaskID: UUID? = nil) {
+    init(id: UUID = UUID(), name: String, assignedTaskID: UUID? = nil, expectedMinutes: Int? = nil) {
         self.id = id
         self.name = name
         self.assignedTaskID = assignedTaskID
+        self.expectedMinutes = expectedMinutes
     }
 }
 
