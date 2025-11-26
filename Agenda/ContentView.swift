@@ -555,7 +555,7 @@ struct TaskCardView: View {
             if let focusLabel {
                 Text("Focus: \(focusLabel)")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(category.color)
             } else if isFocusIndeterminate {
                 Text("Focus pendiente")
                     .font(.caption2)
@@ -894,19 +894,29 @@ struct FocusManagerView: View {
                     ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
                 } else {
                     ForEach(viewModel.focuses) { focus in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(focus.name)
-                                .font(.headline)
-                            if let taskID = focus.assignedTaskID,
-                               let task = viewModel.task(with: taskID),
-                               let category = viewModel.category(for: task.categoryID) {
-                                Text("Asignada a \(category.name)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text("Sin asignar")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            let indicatorColor = focusColor(for: focus)
+                            Circle()
+                                .fill(indicatorColor)
+                                .frame(width: 14, height: 14)
+                                .overlay(
+                                    Circle()
+                                        .stroke(indicatorColor.opacity(0.6), lineWidth: 1)
+                                )
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(focus.name)
+                                    .font(.headline)
+                                if let taskID = focus.assignedTaskID,
+                                   let task = viewModel.task(with: taskID),
+                                   let category = viewModel.category(for: task.categoryID) {
+                                    Text("Asignada a \(category.name)")
+                                        .font(.caption)
+                                        .foregroundColor(category.color)
+                                } else {
+                                    Text("Sin asignar")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -971,6 +981,15 @@ struct FocusManagerView: View {
             let focus = viewModel.focuses[index]
             viewModel.deleteFocus(focus)
         }
+    }
+
+    private func focusColor(for focus: FocusItem) -> Color {
+        if let taskID = focus.assignedTaskID,
+           let task = viewModel.task(with: taskID),
+           let category = viewModel.category(for: task.categoryID) {
+            return category.color
+        }
+        return Color.secondary.opacity(0.4)
     }
 }
 
