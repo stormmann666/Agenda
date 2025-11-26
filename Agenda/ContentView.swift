@@ -887,6 +887,11 @@ struct FocusManagerView: View {
     @State private var newFocusName: String = ""
     @State private var newFocusHours: String = ""
     @State private var estimationIndeterminate = true
+    @State private var editingFocus: FocusItem?
+    @State private var focusEditName: String = ""
+    @State private var focusEditHours: String = ""
+    @State private var focusEditActualMinutes: String = ""
+    @State private var editEstimationIndeterminate = false
     @FocusState private var focusFieldFocused: Bool
     @FocusState private var hoursFieldFocused: Bool
 
@@ -927,13 +932,17 @@ struct FocusManagerView: View {
                                         .foregroundColor(category.color)
                                 } else {
                                     Text("Sin asignar")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 }
                             }
                         }
+                        .contentShape(Rectangle())
                         .padding(.vertical, 6)
                         .listRowBackground(indicatorColor.opacity(0.12))
+                        .onTapGesture(count: 2) {
+                            editingFocus = focus
+                        }
                     }
                     .onDelete(perform: deleteFocuses)
                 }
@@ -997,6 +1006,56 @@ struct FocusManagerView: View {
                 .presentationDetents([.medium])
                 .onDisappear {
                     resetFocusForm()
+                }
+            }
+            .sheet(item: $editingFocus) { focus in
+                NavigationStack {
+                    Form {
+                        Section("Descripción") {
+                            TextField("Descripción", text: $focusEditName)
+                        }
+                        Section("Estimación") {
+                            Toggle("Indeterminado", isOn: $editEstimationIndeterminate)
+                                .onChange(of: editEstimationIndeterminate) { value in
+                                    if value {
+                                        focusEditHours = ""
+                                    }
+                                }
+                            if !editEstimationIndeterminate {
+                                TextField("Horas", text: $focusEditHours)
+                                    .keyboardType(.numberPad)
+                            }
+                        }
+                        Section("Tiempo trabajado (min)") {
+                            TextField("Minutos", text: $focusEditActualMinutes)
+                                .keyboardType(.numberPad)
+                        }
+                    }
+                    .navigationTitle("Editar focus")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") {
+                                editingFocus = nil
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Guardar") {
+                                guard var updated = editingFocus else { return }
+                                updated.name = focusEditName
+                                updated.expectedMinutes = editEstimationIndeterminate ? nil : (Int(focusEditHours) ?? 0) * 60
+                                updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
+                                viewModel.updateFocus(updated)
+                                editingFocus = nil
+                            }
+                            .disabled(!canSaveEditedFocus)
+                        }
+                    }
+                }
+                .onAppear {
+                    focusEditName = focus.name
+                    editEstimationIndeterminate = focus.expectedMinutes == nil
+                    focusEditHours = focus.expectedMinutes.map { String($0 / 60) } ?? ""
+                    focusEditActualMinutes = String(focus.actualMinutes ?? 0)
                 }
             }
         }
@@ -1064,6 +1123,14 @@ struct FocusManagerView: View {
         } else {
             return "Sin estimación\(actualText)"
         }
+    }
+
+    private var canSaveEditedFocus: Bool {
+        let trimmed = focusEditName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if editEstimationIndeterminate { return true }
+        guard let hours = Int(focusEditHours), hours > 0 else { return false }
+        return true
     }
 
     @ViewBuilder
