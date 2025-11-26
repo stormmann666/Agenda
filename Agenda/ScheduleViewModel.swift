@@ -79,23 +79,53 @@ struct TaskItem: Identifiable, Codable, Hashable {
 struct FocusItem: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
-    var assignedTaskID: UUID?
     var expectedMinutes: Int?
     var actualMinutes: Int?
     var isCompleted: Bool?
+    var taskIDs: [UUID]
 
     init(id: UUID = UUID(),
          name: String,
-         assignedTaskID: UUID? = nil,
          expectedMinutes: Int? = nil,
          actualMinutes: Int? = nil,
-         isCompleted: Bool? = nil) {
+         isCompleted: Bool? = nil,
+         taskIDs: [UUID] = []) {
         self.id = id
         self.name = name
-        self.assignedTaskID = assignedTaskID
         self.expectedMinutes = expectedMinutes
         self.actualMinutes = actualMinutes
         self.isCompleted = isCompleted
+        self.taskIDs = taskIDs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, expectedMinutes, actualMinutes, isCompleted, taskIDs, assignedTaskID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        expectedMinutes = try container.decodeIfPresent(Int.self, forKey: .expectedMinutes)
+        actualMinutes = try container.decodeIfPresent(Int.self, forKey: .actualMinutes)
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted)
+        if let decodedTaskIDs = try container.decodeIfPresent([UUID].self, forKey: .taskIDs) {
+            taskIDs = decodedTaskIDs
+        } else if let legacyID = try container.decodeIfPresent(UUID.self, forKey: .assignedTaskID) {
+            taskIDs = [legacyID]
+        } else {
+            taskIDs = []
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(expectedMinutes, forKey: .expectedMinutes)
+        try container.encodeIfPresent(actualMinutes, forKey: .actualMinutes)
+        try container.encodeIfPresent(isCompleted, forKey: .isCompleted)
+        try container.encode(taskIDs, forKey: .taskIDs)
     }
 }
 
@@ -334,6 +364,13 @@ final class ScheduleViewModel: ObservableObject {
         mutateTasks { tasks in
             tasks.removeAll { $0.id == task.id }
         }
+        if let focusID = task.focusID {
+            mutateFocuses { focuses in
+                if let index = focuses.firstIndex(where: { $0.id == focusID }) {
+                    focuses[index].taskIDs.removeAll { $0 == task.id }
+                }
+            }
+        }
     }
 
     func task(with id: UUID) -> TaskItem? {
@@ -374,27 +411,30 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func assignFocus(_ focus: FocusItem, to task: TaskItem?) {
-        let targetID = task?.id
-        if let targetID, self.task(with: targetID) == nil {
-            return
-        }
+        guard let task = task,
+              let taskEntity = self.task(with: task.id) else { return }
+        let taskID = task.id
+        let previousFocusID = taskEntity.focusID
 
         mutateTasks { tasks in
-            for index in tasks.indices {
-                if tasks[index].focusID == focus.id {
-                    tasks[index].focusID = nil
-                    tasks[index].isFocusIndeterminate = false
-                }
-                if let targetID, tasks[index].id == targetID {
-                    tasks[index].focusID = focus.id
-                    tasks[index].isFocusIndeterminate = false
-                }
-            }
+            guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+            tasks[index].focusID = focus.id
+            tasks[index].isFocusIndeterminate = false
         }
 
         mutateFocuses { focuses in
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
-            focuses[index].assignedTaskID = targetID
+            if !focuses[index].taskIDs.contains(taskID) {
+                focuses[index].taskIDs.append(taskID)
+            }
+        }
+
+        if let previous = previousFocusID, previous != focus.id {
+            mutateFocuses { focuses in
+                if let index = focuses.firstIndex(where: { $0.id == previous }) {
+                    focuses[index].taskIDs.removeAll { $0 == taskID }
+                }
+            }
         }
     }
 
@@ -424,7 +464,7 @@ final class ScheduleViewModel: ObservableObject {
         if let focusID = removedFocusID {
             mutateFocuses { focuses in
                 if let index = focuses.firstIndex(where: { $0.id == focusID }) {
-                    focuses[index].assignedTaskID = nil
+                    focuses[index].taskIDs.removeAll { $0 == task.id }
                 }
             }
         }
@@ -444,7 +484,7 @@ final class ScheduleViewModel: ObservableObject {
         if let focusID = removedFocusID {
             mutateFocuses { focuses in
                 if let index = focuses.firstIndex(where: { $0.id == focusID }) {
-                    focuses[index].assignedTaskID = nil
+                    focuses[index].taskIDs.removeAll { $0 == task.id }
                 }
             }
         }
@@ -662,13 +702,13 @@ final class ScheduleViewModel: ObservableObject {
 
     private func cleanupFocusAssignments() {
         guard !focuses.isEmpty else { return }
-        let taskIDs = Set(tasks.map { $0.id })
+        let validIDs = Set(tasks.map { $0.id })
         var updated = focuses
         var changed = false
         for index in updated.indices {
-            if let assigned = updated[index].assignedTaskID,
-               !taskIDs.contains(assigned) {
-                updated[index].assignedTaskID = nil
+            let filtered = updated[index].taskIDs.filter { validIDs.contains($0) }
+            if filtered.count != updated[index].taskIDs.count {
+                updated[index].taskIDs = filtered
                 changed = true
             }
         }
