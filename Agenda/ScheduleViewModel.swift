@@ -320,6 +320,11 @@ final class ScheduleViewModel: ObservableObject {
         update(taskID: task.id) { mutable in
             mutable.isCompleted.toggle()
         }
+        if let focusID = task.focusID,
+           let focus = focus(with: focusID) {
+            let minutes = task.duration * Self.blockMinutes
+            logFocusUsage(focus, minutes: minutes)
+        }
     }
 
     func delete(task: TaskItem) {
