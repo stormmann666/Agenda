@@ -885,7 +885,10 @@ struct FocusManagerView: View {
     @ObservedObject var viewModel: ScheduleViewModel
     @State private var showingAddFocus = false
     @State private var newFocusName: String = ""
+    @State private var newFocusHours: String = ""
+    @State private var estimationIndeterminate = true
     @FocusState private var focusFieldFocused: Bool
+    @FocusState private var hoursFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -893,21 +896,24 @@ struct FocusManagerView: View {
                 if viewModel.focuses.isEmpty {
                     ContentUnavailableView("No hay focuses", systemImage: "target", description: Text("Añade focuses para tenerlos listos y asignarlos a tus tareas."))
                 } else {
-            ForEach(viewModel.focuses) { focus in
-                let indicatorColor = focusColor(for: focus)
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(indicatorColor)
+                    ForEach(viewModel.focuses) { focus in
+                        let indicatorColor = focusColor(for: focus)
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(indicatorColor)
                                 .frame(width: 14, height: 14)
                                 .overlay(
-                                    Circle()
-                                        .stroke(indicatorColor.opacity(0.6), lineWidth: 1)
+                                    Circle().stroke(indicatorColor.opacity(0.6), lineWidth: 1)
                                 )
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(focus.name)
                                     .font(.headline)
                                 if let minutes = focus.expectedMinutes {
-                                    Text("Estimado: \(minutes) min")
+                                    Text("Estimado: \(minutes / 60) h")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Estimación indeterminada")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -947,6 +953,24 @@ struct FocusManagerView: View {
                             TextField("Descripción del focus", text: $newFocusName)
                                 .focused($focusFieldFocused)
                         }
+                        Section("Estimación") {
+                            Toggle("Indeterminado", isOn: $estimationIndeterminate)
+                                .onChange(of: estimationIndeterminate) { value in
+                                    if value {
+                                        newFocusHours = ""
+                                        hoursFieldFocused = false
+                                    } else {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            hoursFieldFocused = true
+                                        }
+                                    }
+                                }
+                            if !estimationIndeterminate {
+                                TextField("Horas", text: $newFocusHours)
+                                    .keyboardType(.numberPad)
+                                    .focused($hoursFieldFocused)
+                            }
+                        }
                     }
                     .navigationTitle("Nuevo focus")
                     .onAppear {
@@ -957,30 +981,47 @@ struct FocusManagerView: View {
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancelar") {
-                                showingAddFocus = false
-                                newFocusName = ""
-                                focusFieldFocused = false
+                                resetFocusForm()
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Guardar") {
-                                let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                viewModel.addFocus(name: trimmed)
-                                newFocusName = ""
-                                showingAddFocus = false
-                                focusFieldFocused = false
+                                saveFocus()
                             }
-                            .disabled(newFocusName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(!canSaveFocus)
                         }
                     }
                 }
                 .presentationDetents([.medium])
                 .onDisappear {
-                    focusFieldFocused = false
-                    newFocusName = ""
+                    resetFocusForm()
                 }
             }
         }
+    }
+
+    private var canSaveFocus: Bool {
+        let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if estimationIndeterminate { return true }
+        guard let hours = Int(newFocusHours), hours > 0 else { return false }
+        return true
+    }
+
+    private func saveFocus() {
+        let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minutes = estimationIndeterminate ? nil : (Int(newFocusHours) ?? 0) * 60
+        viewModel.addFocus(name: trimmed, expectedMinutes: minutes)
+        resetFocusForm()
+    }
+
+    private func resetFocusForm() {
+        showingAddFocus = false
+        newFocusName = ""
+        newFocusHours = ""
+        estimationIndeterminate = true
+        focusFieldFocused = false
+        hoursFieldFocused = false
     }
 
     private func deleteFocuses(at offsets: IndexSet) {

@@ -330,12 +330,14 @@ final class ScheduleViewModel: ObservableObject {
         focuses.first { $0.id == id }
     }
 
-    func addFocus(name: String) -> FocusItem {
+    func addFocus(name: String, expectedMinutes: Int? = nil) -> FocusItem {
         let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name)
         mutateFocuses { focuses in
-            focuses.append(newFocus)
+            var focus = newFocus
+            focus.expectedMinutes = expectedMinutes
+            focuses.append(focus)
         }
-        return newFocus
+        return FocusItem(id: newFocus.id, name: newFocus.name, assignedTaskID: nil, expectedMinutes: expectedMinutes)
     }
 
     func updateFocus(_ focus: FocusItem) {

@@ -27,6 +27,7 @@
   - `id: UUID`
   - `name: String`
   - `assignedTaskID: UUID?` – Identifies the task currently hosting the focus (if any).
+  - `expectedMinutes: Int?` – Estimated effort (in minutes). `nil` means indeterminado.
 - **Behavior**
   - Focuses live independently from boxes. They can exist unassigned (waiting to be placed) or associated with a single task.
   - Assigning/detaching a focus updates both the task (`focusID`) and the focus (`assignedTaskID`) so the relationship stays in sync.

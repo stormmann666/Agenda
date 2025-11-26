@@ -99,7 +99,7 @@ final class ScheduleViewModelTests: XCTestCase {
      let (viewModel, cleanup) = makeViewModel(tasks: [task])
      defer { cleanup() }
      
-     let focus = viewModel.addFocus(name: "Focus test")
+        let focus = viewModel.addFocus(name: "Focus test")
      viewModel.assignFocus(focus, to: task)
      
      XCTAssertEqual(viewModel.task(with: task.id)?.focusID, focus.id)
