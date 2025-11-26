@@ -132,5 +132,22 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.focus(with: focus.id)?.taskIDs.contains(task.id) ?? true)
         XCTAssertTrue(viewModel.task(with: task.id)?.isFocusIndeterminate ?? false)
     }
+
+    func testFocusUsageAccumulatesAcrossTasks() {
+        let taskA = makeTask(start: 2, duration: 2)
+        let taskB = makeTask(start: 6, duration: 3)
+        let (viewModel, cleanup) = makeViewModel(tasks: [taskA, taskB])
+        defer { cleanup() }
+
+        let focus = viewModel.addFocus(name: "Focus multi")
+        viewModel.assignFocus(focus, to: taskA)
+        viewModel.assignFocus(focus, to: taskB)
+
+        viewModel.toggleCompletion(for: taskA)
+        viewModel.toggleCompletion(for: taskB)
+
+        let expectedMinutes = (taskA.duration + taskB.duration) * ScheduleViewModel.blockMinutes
+        XCTAssertEqual(viewModel.focus(with: focus.id)?.actualMinutes, expectedMinutes)
+    }
      }*/
 }
