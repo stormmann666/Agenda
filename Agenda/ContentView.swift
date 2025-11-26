@@ -908,15 +908,9 @@ struct FocusManagerView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(focus.name)
                                     .font(.headline)
-                                if let expected = focus.expectedMinutes {
-                                    Text("Estimado: \(expected / 60) h")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text("Estimación indeterminada")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(estimationLabel(for: focus))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                                 if let taskID = focus.assignedTaskID,
                                    let task = viewModel.task(with: taskID),
                                    let category = viewModel.category(for: task.categoryID) {
@@ -1038,6 +1032,24 @@ struct FocusManagerView: View {
             return category.color
         }
         return Color.secondary.opacity(0.4)
+    }
+
+    private func estimationLabel(for focus: FocusItem) -> String {
+        let expectedHours = focus.expectedMinutes.map { $0 / 60 }
+        let actualMinutes = focus.actualMinutes ?? 0
+        let actualHours = actualMinutes / 60
+        let actualMinutesRemainder = actualMinutes % 60
+        let actualText: String
+        if actualMinutes > 0 {
+            actualText = " · Empleado: \(actualHours)h \(actualMinutesRemainder)m"
+        } else {
+            actualText = " · Empleado: 0h"
+        }
+        if let expectedHours = expectedHours {
+            return "Estimado: \(expectedHours) h\(actualText)"
+        } else {
+            return "Sin estimación\(actualText)"
+        }
     }
 }
 
