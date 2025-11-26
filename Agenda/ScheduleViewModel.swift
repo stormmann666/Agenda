@@ -81,12 +81,18 @@ struct FocusItem: Identifiable, Codable, Hashable {
     var name: String
     var assignedTaskID: UUID?
     var expectedMinutes: Int?
+    var actualMinutes: Int?
 
-    init(id: UUID = UUID(), name: String, assignedTaskID: UUID? = nil, expectedMinutes: Int? = nil) {
+    init(id: UUID = UUID(),
+         name: String,
+         assignedTaskID: UUID? = nil,
+         expectedMinutes: Int? = nil,
+         actualMinutes: Int? = nil) {
         self.id = id
         self.name = name
         self.assignedTaskID = assignedTaskID
         self.expectedMinutes = expectedMinutes
+        self.actualMinutes = actualMinutes
     }
 }
 
@@ -330,14 +336,19 @@ final class ScheduleViewModel: ObservableObject {
         focuses.first { $0.id == id }
     }
 
-    func addFocus(name: String, expectedMinutes: Int? = nil) -> FocusItem {
+    func addFocus(name: String, expectedMinutes: Int? = nil, actualMinutes: Int? = nil) -> FocusItem {
         let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name)
         mutateFocuses { focuses in
             var focus = newFocus
             focus.expectedMinutes = expectedMinutes
+            focus.actualMinutes = actualMinutes
             focuses.append(focus)
         }
-        return FocusItem(id: newFocus.id, name: newFocus.name, assignedTaskID: nil, expectedMinutes: expectedMinutes)
+        return FocusItem(id: newFocus.id,
+                         name: newFocus.name,
+                         assignedTaskID: nil,
+                         expectedMinutes: expectedMinutes,
+                         actualMinutes: actualMinutes)
     }
 
     func updateFocus(_ focus: FocusItem) {
