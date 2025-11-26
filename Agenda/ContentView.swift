@@ -924,16 +924,20 @@ struct FocusManagerView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                 progressBar(for: focus)
-                                if let taskID = focus.assignedTaskID,
-                                   let task = viewModel.task(with: taskID),
+                                if let id = focus.taskIDs.first,
+                                   let task = viewModel.task(with: id),
                                    let category = viewModel.category(for: task.categoryID) {
                                     Text("Asignada a \(category.name)")
                                         .font(.caption)
                                         .foregroundColor(category.color)
+                                } else if focus.taskIDs.count > 1 {
+                                    Text("Asignada a \(focus.taskIDs.count) boxes")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 } else {
                                     Text("Sin asignar")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1034,6 +1038,7 @@ struct FocusManagerView: View {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancelar") {
                                 editingFocus = nil
+                                resetEditFocusState()
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
@@ -1044,6 +1049,7 @@ struct FocusManagerView: View {
                                 updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
                                 viewModel.updateFocus(updated)
                                 editingFocus = nil
+                                resetEditFocusState()
                             }
                             .disabled(!canSaveEditedFocus)
                         }
@@ -1054,6 +1060,9 @@ struct FocusManagerView: View {
                     editEstimationIndeterminate = focus.expectedMinutes == nil
                     focusEditHours = focus.expectedMinutes.map { String($0 / 60) } ?? ""
                     focusEditActualMinutes = String(focus.actualMinutes ?? 0)
+                }
+                .onDisappear {
+                    resetEditFocusState()
                 }
             }
         }
@@ -1084,8 +1093,11 @@ struct FocusManagerView: View {
     }
 
     private func deleteFocuses(at offsets: IndexSet) {
-        for index in offsets {
-            let focus = viewModel.focuses[index]
+        let current = filteredFocuses
+        let targets = offsets.compactMap { index in
+            current.indices.contains(index) ? current[index] : nil
+        }
+        for focus in targets {
             viewModel.deleteFocus(focus)
         }
     }
@@ -1097,8 +1109,8 @@ struct FocusManagerView: View {
     }
 
     private func focusColor(for focus: FocusItem) -> Color {
-        if let taskID = focus.assignedTaskID,
-           let task = viewModel.task(with: taskID),
+        if let id = focus.taskIDs.first,
+           let task = viewModel.task(with: id),
            let category = viewModel.category(for: task.categoryID) {
             return category.color
         }
@@ -1129,6 +1141,13 @@ struct FocusManagerView: View {
         if editEstimationIndeterminate { return true }
         guard let hours = Int(focusEditHours), hours > 0 else { return false }
         return true
+    }
+
+    private func resetEditFocusState() {
+        focusEditName = ""
+        focusEditHours = ""
+        focusEditActualMinutes = ""
+        editEstimationIndeterminate = false
     }
 
     @ViewBuilder
@@ -1208,13 +1227,6 @@ struct TaskEditorSheet: View {
                 Text("No hay focuses libres ahora mismo.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if case let .focus(focusID) = selectedFocusOption,
-                      let focus = viewModel.focus(with: focusID),
-                      let assignedTaskID = focus.assignedTaskID,
-                      assignedTaskID != taskID {
-                Text("Este focus se reasignará a este box.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1223,8 +1235,7 @@ struct TaskEditorSheet: View {
         guard let task = viewModel.task(with: taskID) else { return }
         let newSelection: FocusOption
         if let focusID = task.focusID,
-           let focus = viewModel.focus(with: focusID),
-           focus.assignedTaskID == nil || focus.assignedTaskID == taskID {
+           viewModel.focus(with: focusID) != nil {
             newSelection = .focus(focusID)
         } else if task.isFocusIndeterminate {
             newSelection = .indeterminate
@@ -1248,8 +1259,7 @@ struct TaskEditorSheet: View {
         case .indeterminate:
             viewModel.setTaskFocusIndeterminate(task, isIndeterminate: true)
         case .focus(let id):
-            if let focus = viewModel.focus(with: id),
-               focus.assignedTaskID == nil || focus.assignedTaskID == task.id {
+            if let focus = viewModel.focus(with: id) {
                 viewModel.assignFocus(focus, to: task)
             }
         }
@@ -1262,9 +1272,7 @@ struct TaskEditorSheet: View {
     }
 
     private var availableFocuses: [FocusItem] {
-        viewModel.focuses.filter { focus in
-            focus.assignedTaskID == nil || focus.assignedTaskID == taskID
-        }
+        viewModel.focuses.filter { !($0.isCompleted ?? false) }
     }
 }
 

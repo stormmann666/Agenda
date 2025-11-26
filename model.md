@@ -26,11 +26,12 @@
 - **Fields**
   - `id: UUID`
   - `name: String`
-  - `assignedTaskID: UUID?` – Identifies the task currently hosting the focus (if any).
+  - `taskIDs: [UUID]` – Identifiers of every task (box) que actualmente lo contienen.
   - `expectedMinutes: Int?` – Estimated effort (in minutes). `nil` means indeterminado.
+  - `actualMinutes: Int?` – Tiempo real acumulado.
 - **Behavior**
-  - Focuses live independently from boxes. They can exist unassigned (waiting to be placed) or associated with a single task.
-  - Assigning/detaching a focus updates both the task (`focusID`) and the focus (`assignedTaskID`) so the relationship stays in sync.
+  - Focuses live independently from boxes. Pueden existir sin asignar o estar ligados a varios boxes a la vez.
+  - Asignar/desasignar actualiza tanto la tarea (`focusID`) como la lista `taskIDs` del focus.
 
 ### `ScheduleDayLog`
 - **Fields**
