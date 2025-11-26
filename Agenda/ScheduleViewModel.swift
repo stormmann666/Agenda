@@ -395,6 +395,15 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func logFocusUsage(_ focus: FocusItem, minutes: Int) {
+        guard minutes > 0 else { return }
+        mutateFocuses { focuses in
+            guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
+            let current = focuses[index].actualMinutes ?? 0
+            focuses[index].actualMinutes = current + minutes
+        }
+    }
+
     func clearFocus(for task: TaskItem) {
         var removedFocusID: UUID?
         update(taskID: task.id) { mutable in
