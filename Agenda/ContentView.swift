@@ -908,9 +908,15 @@ struct FocusManagerView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(focus.name)
                                     .font(.headline)
-                                Text(focusEstimateLabel(for: focus))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                if let expected = focus.expectedMinutes {
+                                    Text("Estimado: \(expected / 60) h")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Estimación indeterminada")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                                 if let taskID = focus.assignedTaskID,
                                    let task = viewModel.task(with: taskID),
                                    let category = viewModel.category(for: task.categoryID) {
@@ -960,17 +966,11 @@ struct FocusManagerView: View {
                                     }
                                 }
                             if !estimationIndeterminate {
-                            TextField("Horas", text: $newFocusHours)
-                                .keyboardType(.numberPad)
-                                .focused($hoursFieldFocused)
-                        }
-                        if let expectedMinutes = focusToEdit?.expectedMinutes {
-                            Section("Tiempo empleado") {
-                                TextField("Minutos invertidos", text: $newFocusActualMinutes)
+                                TextField("Horas", text: $newFocusHours)
                                     .keyboardType(.numberPad)
+                                    .focused($hoursFieldFocused)
                             }
                         }
-                    }
                     }
                     .navigationTitle("Nuevo focus")
                     .onAppear {
