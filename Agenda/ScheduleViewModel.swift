@@ -83,23 +83,26 @@ struct FocusItem: Identifiable, Codable, Hashable {
     var actualMinutes: Int?
     var isCompleted: Bool?
     var taskIDs: [UUID]
+    var proposedCategoryID: UUID?
 
     init(id: UUID = UUID(),
          name: String,
          expectedMinutes: Int? = nil,
          actualMinutes: Int? = nil,
          isCompleted: Bool? = nil,
-         taskIDs: [UUID] = []) {
+         taskIDs: [UUID] = [],
+         proposedCategoryID: UUID? = nil) {
         self.id = id
         self.name = name
         self.expectedMinutes = expectedMinutes
         self.actualMinutes = actualMinutes
         self.isCompleted = isCompleted
         self.taskIDs = taskIDs
+        self.proposedCategoryID = proposedCategoryID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, expectedMinutes, actualMinutes, isCompleted, taskIDs, assignedTaskID
+        case id, name, expectedMinutes, actualMinutes, isCompleted, taskIDs, assignedTaskID, proposedCategoryID
     }
 
     init(from decoder: Decoder) throws {
@@ -116,6 +119,7 @@ struct FocusItem: Identifiable, Codable, Hashable {
         } else {
             taskIDs = []
         }
+        proposedCategoryID = try container.decodeIfPresent(UUID.self, forKey: .proposedCategoryID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -126,6 +130,7 @@ struct FocusItem: Identifiable, Codable, Hashable {
         try container.encodeIfPresent(actualMinutes, forKey: .actualMinutes)
         try container.encodeIfPresent(isCompleted, forKey: .isCompleted)
         try container.encode(taskIDs, forKey: .taskIDs)
+        try container.encodeIfPresent(proposedCategoryID, forKey: .proposedCategoryID)
     }
 }
 
@@ -381,10 +386,11 @@ final class ScheduleViewModel: ObservableObject {
         focuses.first { $0.id == id }
     }
 
-    func addFocus(name: String, expectedMinutes: Int? = nil, actualMinutes: Int? = nil) -> FocusItem {
+    func addFocus(name: String, expectedMinutes: Int? = nil, actualMinutes: Int? = nil, proposedCategoryID: UUID? = nil) -> FocusItem {
         let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name,
                                  expectedMinutes: expectedMinutes,
-                                 actualMinutes: actualMinutes)
+                                 actualMinutes: actualMinutes,
+                                 proposedCategoryID: proposedCategoryID)
         mutateFocuses { focuses in
             focuses.append(newFocus)
         }

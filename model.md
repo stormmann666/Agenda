@@ -29,9 +29,10 @@
   - `taskIDs: [UUID]` – Identifiers of every task (box) que actualmente lo contienen.
   - `expectedMinutes: Int?` – Estimated effort (in minutes). `nil` means indeterminado.
   - `actualMinutes: Int?` – Tiempo real acumulado.
+  - `proposedCategoryID: UUID?` – Tipo sugerido antes de asignarlo a un box (opcional).
 - **Behavior**
-  - Focuses live independently from boxes. Pueden existir sin asignar o estar ligados a varios boxes a la vez.
-  - Asignar/desasignar actualiza tanto la tarea (`focusID`) como la lista `taskIDs` del focus.
+  - Focuses live independently from boxes y pueden estar en varios simultáneamente, acumulando el tiempo trabajado aunque no tengan estimación.
+  - Asignar/desasignar mantiene sincronizados la tarea (`focusID`) y la lista `taskIDs` del focus, respetando la propuesta inicial de tipo.
 
 ### `ScheduleDayLog`
 - **Fields**
