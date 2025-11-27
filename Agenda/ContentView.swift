@@ -963,6 +963,26 @@ struct FocusManagerView: View {
             }
             .navigationTitle("Focuses")
             .toolbar {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
+                    Button {
+                        // TODO: ordenar por tipo
+                    } label: {
+                        Label("Tipos", systemImage: "line.3.horizontal.decrease")
+                    }
+
+                    Button {
+                        // TODO: ordenar por prioridad
+                    } label: {
+                        Label("Prioridad", systemImage: "star")
+                    }
+
+                    Button {
+                        // TODO: ordenar por orden de inclusión
+                    } label: {
+                        Label("Default", systemImage: "list.bullet")
+                    }
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showingAddFocus = true
