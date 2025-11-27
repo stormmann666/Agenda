@@ -887,6 +887,7 @@ struct FocusManagerView: View {
     @State private var newFocusName: String = ""
     @State private var newFocusHours: String = ""
     @State private var newFocusProposedCategoryID: UUID? = nil
+    @State private var newFocusPriority: Int = 0
     @State private var estimationIndeterminate = true
     @State private var editingFocus: FocusItem?
     @State private var focusEditName: String = ""
@@ -894,6 +895,7 @@ struct FocusManagerView: View {
     @State private var focusEditActualMinutes: String = ""
     @State private var editEstimationIndeterminate = false
     @State private var focusEditProposedCategoryID: UUID? = nil
+    @State private var focusEditPriority: Int = 0
     @FocusState private var focusFieldFocused: Bool
     @FocusState private var hoursFieldFocused: Bool
 
@@ -922,6 +924,9 @@ struct FocusManagerView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(focus.name)
                                     .font(.headline)
+                                Text(priorityLabel(for: focus))
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
                                 Text(estimationLabel(for: focus))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -999,6 +1004,13 @@ struct FocusManagerView: View {
                                 }
                             }
                         }
+                        Section("Prioridad (0-5)") {
+                            Picker("Prioridad", selection: $newFocusPriority) {
+                                ForEach(0...5, id: \.self) { value in
+                                    Text(String(repeating: "★", count: value)).tag(value)
+                                }
+                            }
+                        }
                     }
                     .navigationTitle("Nuevo focus")
                     .onAppear {
@@ -1053,6 +1065,13 @@ struct FocusManagerView: View {
                                 }
                             }
                         }
+                        Section("Prioridad (0-5)") {
+                            Picker("Prioridad", selection: $focusEditPriority) {
+                                ForEach(0...5, id: \.self) { value in
+                                    Text(String(repeating: "★", count: value)).tag(value)
+                                }
+                            }
+                        }
                     }
                     .navigationTitle("Editar focus")
                     .toolbar {
@@ -1069,6 +1088,7 @@ struct FocusManagerView: View {
                                 updated.expectedMinutes = editEstimationIndeterminate ? nil : (Int(focusEditHours) ?? 0) * 60
                                 updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
                                 updated.proposedCategoryID = focusEditProposedCategoryID
+                                updated.priority = focusEditPriority
                                 viewModel.updateFocus(updated)
                                 editingFocus = nil
                                 resetEditFocusState()
@@ -1104,7 +1124,8 @@ struct FocusManagerView: View {
         let minutes = estimationIndeterminate ? nil : (Int(newFocusHours) ?? 0) * 60
         viewModel.addFocus(name: trimmed,
                            expectedMinutes: minutes,
-                           proposedCategoryID: newFocusProposedCategoryID)
+                           proposedCategoryID: newFocusProposedCategoryID,
+                           priority: newFocusPriority)
         resetFocusForm()
     }
 
@@ -1162,6 +1183,14 @@ struct FocusManagerView: View {
         } else {
             return "Sin estimación\(actualText)"
         }
+    }
+
+    private func priorityLabel(for focus: FocusItem) -> String {
+        let value = (focus.priority)
+        if value <= 0 {
+            return "Prioridad baja"
+        }
+        return "Prioridad: " + String(repeating: "★", count: min(value, 5))
     }
 
     private func proposedLabel(for focus: FocusItem) -> String {
