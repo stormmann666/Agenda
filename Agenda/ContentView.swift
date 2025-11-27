@@ -886,12 +886,14 @@ struct FocusManagerView: View {
     @State private var showingAddFocus = false
     @State private var newFocusName: String = ""
     @State private var newFocusHours: String = ""
+    @State private var newFocusProposedCategoryID: UUID? = nil
     @State private var estimationIndeterminate = true
     @State private var editingFocus: FocusItem?
     @State private var focusEditName: String = ""
     @State private var focusEditHours: String = ""
     @State private var focusEditActualMinutes: String = ""
     @State private var editEstimationIndeterminate = false
+    @State private var focusEditProposedCategoryID: UUID? = nil
     @FocusState private var focusFieldFocused: Bool
     @FocusState private var hoursFieldFocused: Bool
 
@@ -921,6 +923,9 @@ struct FocusManagerView: View {
                                 Text(focus.name)
                                     .font(.headline)
                                 Text(estimationLabel(for: focus))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(proposedLabel(for: focus))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                 progressBar(for: focus)
@@ -986,6 +991,14 @@ struct FocusManagerView: View {
                                     .focused($hoursFieldFocused)
                             }
                         }
+                        Section("Propuesta de tipo") {
+                            Picker("Tipo", selection: $newFocusProposedCategoryID) {
+                                Text("Indeterminado").tag(UUID?.none)
+                                ForEach(viewModel.categories) { category in
+                                    Text(category.name).tag(Optional(category.id))
+                                }
+                            }
+                        }
                     }
                     .navigationTitle("Nuevo focus")
                     .onAppear {
@@ -1032,6 +1045,14 @@ struct FocusManagerView: View {
                             TextField("Minutos", text: $focusEditActualMinutes)
                                 .keyboardType(.numberPad)
                         }
+                        Section("Propuesta de tipo") {
+                            Picker("Tipo", selection: $focusEditProposedCategoryID) {
+                                Text("Indeterminado").tag(UUID?.none)
+                                ForEach(viewModel.categories) { category in
+                                    Text(category.name).tag(Optional(category.id))
+                                }
+                            }
+                        }
                     }
                     .navigationTitle("Editar focus")
                     .toolbar {
@@ -1047,6 +1068,7 @@ struct FocusManagerView: View {
                                 updated.name = focusEditName
                                 updated.expectedMinutes = editEstimationIndeterminate ? nil : (Int(focusEditHours) ?? 0) * 60
                                 updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
+                                updated.proposedCategoryID = focusEditProposedCategoryID
                                 viewModel.updateFocus(updated)
                                 editingFocus = nil
                                 resetEditFocusState()
@@ -1060,6 +1082,7 @@ struct FocusManagerView: View {
                     editEstimationIndeterminate = focus.expectedMinutes == nil
                     focusEditHours = focus.expectedMinutes.map { String($0 / 60) } ?? ""
                     focusEditActualMinutes = String(focus.actualMinutes ?? 0)
+                    focusEditProposedCategoryID = focus.proposedCategoryID
                 }
                 .onDisappear {
                     resetEditFocusState()
@@ -1079,7 +1102,9 @@ struct FocusManagerView: View {
     private func saveFocus() {
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
         let minutes = estimationIndeterminate ? nil : (Int(newFocusHours) ?? 0) * 60
-        viewModel.addFocus(name: trimmed, expectedMinutes: minutes)
+        viewModel.addFocus(name: trimmed,
+                           expectedMinutes: minutes,
+                           proposedCategoryID: newFocusProposedCategoryID)
         resetFocusForm()
     }
 
@@ -1087,6 +1112,7 @@ struct FocusManagerView: View {
         showingAddFocus = false
         newFocusName = ""
         newFocusHours = ""
+        newFocusProposedCategoryID = nil
         estimationIndeterminate = true
         focusFieldFocused = false
         hoursFieldFocused = false
@@ -1113,6 +1139,9 @@ struct FocusManagerView: View {
            let task = viewModel.task(with: id),
            let category = viewModel.category(for: task.categoryID) {
             return category.color
+        } else if let proposed = focus.proposedCategoryID,
+                  let category = viewModel.category(for: proposed) {
+            return category.color.opacity(0.7)
         }
         return Color.secondary.opacity(0.4)
     }
@@ -1135,6 +1164,14 @@ struct FocusManagerView: View {
         }
     }
 
+    private func proposedLabel(for focus: FocusItem) -> String {
+        if let id = focus.proposedCategoryID,
+           let category = viewModel.category(for: id) {
+            return "Propuesto: \(category.name)"
+        }
+        return "Propuesto: indeterminado"
+    }
+
     private var canSaveEditedFocus: Bool {
         let trimmed = focusEditName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -1148,6 +1185,7 @@ struct FocusManagerView: View {
         focusEditHours = ""
         focusEditActualMinutes = ""
         editEstimationIndeterminate = false
+        focusEditProposedCategoryID = nil
     }
 
     @ViewBuilder
