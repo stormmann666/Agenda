@@ -1405,23 +1405,27 @@ struct TaskEditorSheet: View {
     }
 
     private var focusSection: some View {
-        Section {
-            Picker("Focus", selection: $selectedFocusOption) {
+        Section("Focus") {
+            focusSelectionRow(option: .none) {
                 Text("Sin focus")
-                    .tag(FocusOption.none)
-                Text("Focus indeterminado")
-                    .tag(FocusOption.indeterminate)
-                ForEach(availableFocuses) { focus in
-                    Text(focus.name)
-                        .tag(FocusOption.focus(focus.id))
-                }
             }
-            .pickerStyle(.inline)
+            focusSelectionRow(option: .indeterminate) {
+                Text("Focus indeterminado")
+            }
 
-            if availableFocuses.isEmpty {
+            if sortedAvailableFocuses.isEmpty {
                 Text("No hay focuses libres ahora mismo.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else {
+                ForEach(sortedAvailableFocuses) { focus in
+                    focusSelectionRow(option: .focus(focus.id),
+                                      highlight: matchesTaskCategory(focus)) {
+                        FocusSelectionLabel(focus: focus,
+                                            color: indicatorColor(for: focus),
+                                            proposedName: proposedCategoryName(for: focus))
+                    }
+                }
             }
         }
     }
@@ -1468,6 +1472,86 @@ struct TaskEditorSheet: View {
 
     private var availableFocuses: [FocusItem] {
         viewModel.focuses.filter { !($0.isCompleted ?? false) }
+    }
+
+    private var sortedAvailableFocuses: [FocusItem] {
+        let categoryID = taskCategoryID
+        return availableFocuses.sorted { lhs, rhs in
+            let lhsMatch = lhs.proposedCategoryID == categoryID
+            let rhsMatch = rhs.proposedCategoryID == categoryID
+            if lhsMatch != rhsMatch {
+                return lhsMatch && !rhsMatch
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private var taskCategoryID: UUID? {
+        viewModel.task(with: taskID)?.categoryID
+    }
+
+    private func matchesTaskCategory(_ focus: FocusItem) -> Bool {
+        focus.proposedCategoryID != nil && focus.proposedCategoryID == taskCategoryID
+    }
+
+    private func indicatorColor(for focus: FocusItem) -> Color {
+        if let proposed = focus.proposedCategoryID,
+           let category = viewModel.category(for: proposed) {
+            return category.color
+        }
+        return .secondary.opacity(0.5)
+    }
+
+    private func proposedCategoryName(for focus: FocusItem) -> String {
+        if let proposed = focus.proposedCategoryID,
+           let category = viewModel.category(for: proposed) {
+            return category.name
+        }
+        return "Indeterminado"
+    }
+
+    @ViewBuilder
+    private func focusSelectionRow(option: FocusOption,
+                                   highlight: Bool = false,
+                                   @ViewBuilder content: () -> some View) -> some View {
+        Button {
+            selectedFocusOption = option
+        } label: {
+            HStack {
+                content()
+                Spacer()
+                if selectedFocusOption == option {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.accentColor)
+                } else {
+                    Image(systemName: "circle")
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(highlight ? Color.gray.opacity(0.2) : Color.clear)
+    }
+
+    struct FocusSelectionLabel: View {
+        let focus: FocusItem
+        let color: Color
+        let proposedName: String
+
+        var body: some View {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12, height: 12)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(focus.name)
+                        .font(.body)
+                    Text("Propuesto: \(proposedName)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
