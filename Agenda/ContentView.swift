@@ -687,6 +687,14 @@ struct CategoryPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("Orden", selection: .constant(0)) {
+                        Text("Default").tag(0)
+                        Text("Tipos").tag(1)
+                        Text("Prioridad").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                }
                 ForEach(categories) { category in
                     HStack {
                         Circle()
@@ -898,91 +906,28 @@ struct FocusManagerView: View {
     @State private var focusEditPriority: Int = 0
     @FocusState private var focusFieldFocused: Bool
     @FocusState private var hoursFieldFocused: Bool
+    @State private var focusSortMode: FocusSortMode = .defaultOrder
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("Orden", selection: $focusSortMode) {
+                        Text("Default").tag(FocusSortMode.defaultOrder)
+                        Text("Tipos").tag(FocusSortMode.byType)
+                        Text("Prioridad").tag(FocusSortMode.priority)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 if filteredFocuses.isEmpty {
                     ContentUnavailableView("No hay focuses pendientes", systemImage: "target", description: Text("Marca o añade nuevos focuses para verlos aquí."))
                 } else {
-                    ForEach(filteredFocuses) { focus in
-                        let indicatorColor = focusColor(for: focus)
-                        HStack(spacing: 12) {
-                            Button {
-                                viewModel.completeFocus(focus)
-                            } label: {
-                                Image(systemName: "circle")
-                                    .foregroundColor(.gray)
-                            }
-                            .buttonStyle(.plain)
-                            Circle()
-                                .fill(indicatorColor)
-                                .frame(width: 14, height: 14)
-                                .overlay(
-                                    Circle().stroke(indicatorColor.opacity(0.6), lineWidth: 1)
-                                )
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(focus.name)
-                                    .font(.headline)
-                                Text(priorityLabel(for: focus))
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                                Text(estimationLabel(for: focus))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(proposedLabel(for: focus))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                progressBar(for: focus)
-                                if let id = focus.taskIDs.first,
-                                   let task = viewModel.task(with: id),
-                                   let category = viewModel.category(for: task.categoryID) {
-                                    Text("Asignada a \(category.name)")
-                                        .font(.caption)
-                                        .foregroundColor(category.color)
-                                } else if focus.taskIDs.count > 1 {
-                                    Text("Asignada a \(focus.taskIDs.count) boxes")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text("Sin asignar")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .padding(.vertical, 6)
-                        .listRowBackground(indicatorColor.opacity(0.12))
-                        .onTapGesture(count: 2) {
-                            editingFocus = focus
-                        }
-                    }
-                    .onDelete(perform: deleteFocuses)
+                    focusListContent
                 }
             }
             .navigationTitle("Focuses")
             .toolbar {
-                ToolbarItemGroup(placement: .navigationBarLeading) {
-                    Button {
-                        // TODO: ordenar por tipo
-                    } label: {
-                        Label("Tipos", systemImage: "line.3.horizontal.decrease")
-                    }
-
-                    Button {
-                        // TODO: ordenar por prioridad
-                    } label: {
-                        Label("Prioridad", systemImage: "star")
-                    }
-
-                    Button {
-                        // TODO: ordenar por orden de inclusión
-                    } label: {
-                        Label("Default", systemImage: "list.bullet")
-                    }
-                }
-
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showingAddFocus = true
@@ -1149,6 +1094,97 @@ struct FocusManagerView: View {
         resetFocusForm()
     }
 
+    @ViewBuilder
+    private var focusListContent: some View {
+        switch focusSortMode {
+        case .defaultOrder:
+            focusRows(for: filteredFocuses)
+        case .priority:
+            focusRows(for: prioritySortedFocuses)
+        case .byType:
+            focusSectionsList
+        }
+    }
+
+    @ViewBuilder
+    private func focusRows(for focuses: [FocusItem]) -> some View {
+        ForEach(focuses) { focus in
+            focusRow(for: focus)
+        }
+        .onDelete { offsets in
+            deleteFocuses(from: focuses, at: offsets)
+        }
+    }
+
+    @ViewBuilder
+    private var focusSectionsList: some View {
+        ForEach(groupedFocusSections) { section in
+            Section(header: sectionHeader(for: section)) {
+                ForEach(section.focuses) { focus in
+                    focusRow(for: focus)
+                }
+                .onDelete { offsets in
+                    deleteFocuses(from: section.focuses, at: offsets)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func focusRow(for focus: FocusItem) -> some View {
+        let indicatorColor = focusColor(for: focus)
+        HStack(spacing: 12) {
+            Button {
+                viewModel.completeFocus(focus)
+            } label: {
+                Image(systemName: "circle")
+                    .foregroundColor(.gray)
+            }
+            .buttonStyle(.plain)
+            Circle()
+                .fill(indicatorColor)
+                .frame(width: 14, height: 14)
+                .overlay(
+                    Circle().stroke(indicatorColor.opacity(0.6), lineWidth: 1)
+                )
+            VStack(alignment: .leading, spacing: 4) {
+                Text(focus.name)
+                    .font(.headline)
+                Text(priorityLabel(for: focus))
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+                Text(estimationLabel(for: focus))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(proposedLabel(for: focus))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                progressBar(for: focus)
+                if let id = focus.taskIDs.first,
+                   let task = viewModel.task(with: id),
+                   let category = viewModel.category(for: task.categoryID) {
+                    Text("Asignada a \(category.name)")
+                        .font(.caption)
+                        .foregroundColor(category.color)
+                } else if focus.taskIDs.count > 1 {
+                    Text("Asignada a \(focus.taskIDs.count) boxes")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Sin asignar")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 6)
+        .listRowBackground(indicatorColor.opacity(0.12))
+        .onTapGesture(count: 2) {
+            editingFocus = focus
+        }
+    }
+
     private func resetFocusForm() {
         showingAddFocus = false
         newFocusName = ""
@@ -1159,10 +1195,9 @@ struct FocusManagerView: View {
         hoursFieldFocused = false
     }
 
-    private func deleteFocuses(at offsets: IndexSet) {
-        let current = filteredFocuses
+    private func deleteFocuses(from focuses: [FocusItem], at offsets: IndexSet) {
         let targets = offsets.compactMap { index in
-            current.indices.contains(index) ? current[index] : nil
+            focuses.indices.contains(index) ? focuses[index] : nil
         }
         for focus in targets {
             viewModel.deleteFocus(focus)
@@ -1172,6 +1207,44 @@ struct FocusManagerView: View {
     private var filteredFocuses: [FocusItem] {
         viewModel.focuses.filter { focus in
             !(focus.isCompleted ?? false)
+        }
+    }
+
+    private var prioritySortedFocuses: [FocusItem] {
+        filteredFocuses.sorted { lhs, rhs in
+            if lhs.priority == rhs.priority {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.priority > rhs.priority
+        }
+    }
+
+    private var groupedFocusSections: [FocusSectionData] {
+        let grouped = Dictionary(grouping: filteredFocuses, by: { $0.proposedCategoryID })
+        return grouped.map { key, focuses in
+            let ordered = focuses.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            if let id = key,
+               let category = viewModel.category(for: id) {
+                return FocusSectionData(identifier: id.uuidString,
+                                        title: category.name,
+                                        color: category.color,
+                                        focuses: ordered,
+                                        isIndeterminate: false)
+            } else {
+                return FocusSectionData(identifier: "indeterminado",
+                                        title: "Indeterminado",
+                                        color: nil,
+                                        focuses: ordered,
+                                        isIndeterminate: true)
+            }
+        }
+        .sorted { lhs, rhs in
+            if lhs.isIndeterminate != rhs.isIndeterminate {
+                return !lhs.isIndeterminate && rhs.isIndeterminate
+            }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
     }
 
@@ -1249,6 +1322,41 @@ struct FocusManagerView: View {
         } else {
             ProgressView(value: 0)
                 .tint(.gray)
+        }
+    }
+}
+
+private extension FocusManagerView {
+    enum FocusSortMode: Int, Hashable {
+        case defaultOrder = 0
+        case byType = 1
+        case priority = 2
+    }
+
+    struct FocusSectionData: Identifiable {
+        let identifier: String
+        let title: String
+        let color: Color?
+        let focuses: [FocusItem]
+        let isIndeterminate: Bool
+
+        var id: String { identifier }
+    }
+
+    @ViewBuilder
+    func sectionHeader(for section: FocusSectionData) -> some View {
+        HStack(spacing: 8) {
+            if let color = section.color {
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
+            } else {
+                Circle()
+                    .stroke(Color.secondary, lineWidth: 1)
+                    .frame(width: 10, height: 10)
+            }
+            Text(section.title)
+                .font(.headline)
         }
     }
 }
