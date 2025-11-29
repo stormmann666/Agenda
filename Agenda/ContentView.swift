@@ -1803,7 +1803,7 @@ struct FocusDiagnosticsView: View {
                         .accessibilityLabel("Salida CSV")
                 }
                 Section("Formato esperado") {
-                    Text("id(int8), Descripcion(text), Tipo Asociado(text), Prioridad(int2), Duracion Estimada(int4), Trabajado(int8)")
+                    Text("id, Descripcion, Tipo Asociado, Prioridad, Duracion Estimanda, Trabajado")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1819,7 +1819,7 @@ struct FocusDiagnosticsView: View {
 
     private func generateCSV() -> String {
         var lines: [String] = []
-        lines.append("id(int8),Descripcion(text),Tipo Asociado(text),Prioridad(int2),Duracion Estimada(int4),Trabajado(int8)")
+        lines.append("id,Descripcion,Tipo Asociado,Prioridad,Duracion Estimada,Trabajado")
         for focus in viewModel.focuses {
             let idField = csvField(focus.id.uuidString)
             let descriptionField = csvField(focus.name)
