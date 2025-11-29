@@ -1909,7 +1909,7 @@ struct FocusDiagnosticsView: View {
     }
 
     private func fetchFocusesFromSupabase() {
-        guard let url = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co/rest/v1/focuses?select=*") else {
+        guard let url = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co/rest/v1/Focuses?select=*") else {
             importError = "URL inválida."
             return
         }
