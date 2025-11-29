@@ -908,6 +908,7 @@ struct FocusManagerView: View {
     @FocusState private var hoursFieldFocused: Bool
     @State private var focusSortMode: FocusSortMode = .defaultOrder
     @State private var focusActionMessage: String?
+    @State private var recentlyScheduledFocusID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -1195,6 +1196,15 @@ struct FocusManagerView: View {
         .contentShape(Rectangle())
         .padding(.vertical, 6)
         .listRowBackground(indicatorColor.opacity(0.12))
+        .overlay(alignment: .topTrailing) {
+            if recentlyScheduledFocusID == focus.id {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(.green)
+                    .padding(6)
+                    .transition(.scale)
+            }
+        }
         .onTapGesture(count: 2) {
             editingFocus = focus
         }
@@ -1351,6 +1361,14 @@ struct FocusManagerView: View {
         }
         if viewModel.scheduleFocusAtCurrentTime(focus) == nil {
             focusActionMessage = "No hay espacio disponible ahora mismo para añadir este focus al horario."
+        } else {
+            focusActionMessage = nil
+            recentlyScheduledFocusID = focus.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if recentlyScheduledFocusID == focus.id {
+                    recentlyScheduledFocusID = nil
+                }
+            }
         }
     }
 }
