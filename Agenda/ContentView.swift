@@ -1833,7 +1833,7 @@ struct FocusDiagnosticsView: View {
         var lines: [String] = []
         lines.append("id,Descripcion,Tipo Asociado,Prioridad,Duracion Estimada,Trabajado")
         for focus in viewModel.focuses {
-            let idField = csvField(focus.id.uuidString)
+            let idField = csvField(numericID(for: focus))
             let descriptionField = csvField(focus.name)
             let typeName = focus.proposedCategoryID.flatMap { viewModel.category(for: $0)?.name } ?? "Indeterminado"
             let typeField = csvField(typeName)
@@ -1853,5 +1853,13 @@ struct FocusDiagnosticsView: View {
         } else {
             return sanitized
         }
+    }
+
+    private func numericID(for focus: FocusItem) -> String {
+        let hex = focus.id.uuidString.replacingOccurrences(of: "-", with: "")
+        let prefix = String(hex.prefix(16))
+        let value = UInt64(prefix, radix: 16) ?? 0
+        let signed = Int64(value % UInt64(Int64.max))
+        return String(signed)
     }
 }
