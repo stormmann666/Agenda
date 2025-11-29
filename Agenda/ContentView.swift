@@ -1780,6 +1780,9 @@ struct FocusDiagnosticsView: View {
     @ObservedObject var viewModel: ScheduleViewModel
     @State private var exportedCSV: String = ""
     @State private var lastExportDate: Date?
+    @State private var importedFocuses: [SupabaseFocusRow] = []
+    @State private var isImporting = false
+    @State private var importError: String?
 
     var body: some View {
         NavigationStack {
@@ -1818,6 +1821,48 @@ struct FocusDiagnosticsView: View {
                     Text("id, Descripcion, Tipo Asociado, Prioridad, Duracion Estimanda, Trabajado")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                Section("Importación Supabase") {
+                    Button {
+                        fetchFocusesFromSupabase()
+                    } label: {
+                        Label("Import from Supabase", systemImage: "arrow.up.doc")
+                    }
+                    .disabled(isImporting)
+                    if isImporting {
+                        ProgressView("Importando…")
+                    }
+                    if let error = importError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                    if importedFocuses.isEmpty {
+                        Text("Todavía no se han recibido datos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ScrollView(.horizontal) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                headerRow
+                                Divider()
+                                ForEach(importedFocuses) { row in
+                                    HStack {
+                                        Text("\(row.id)")
+                                        Text(row.descripcion ?? "-")
+                                        Text(row.tipoAsociado ?? "-")
+                                        Text("\(row.prioridad ?? 0)")
+                                        Text("\(row.duracionEstimanda ?? 0)")
+                                        Text("\(row.trabajado ?? 0)")
+                                    }
+                                    .font(.caption)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: 180)
+                    }
                 }
             }
             .navigationTitle("Ayuda / CSV")
@@ -1862,4 +1907,67 @@ struct FocusDiagnosticsView: View {
         let signed = Int64(value % UInt64(Int64.max))
         return String(signed)
     }
+
+    private func fetchFocusesFromSupabase() {
+        guard let url = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co/rest/v1/focuses?select=*") else {
+            importError = "URL inválida."
+            return
+        }
+        isImporting = true
+        importError = nil
+        let apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdweWxjdXFvdmZ5amJocHR0Y3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDYwOTcsImV4cCI6MjA3OTkyMjA5N30.M0pslu02-ZJPU-ypyNSGhafo2KheVqEOl_NPhYOkD5g"
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue(apiKey, forHTTPHeaderField: "apikey")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      200..<300 ~= httpResponse.statusCode else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    await MainActor.run {
+                        importError = "Error del servidor (\(status))."
+                        isImporting = false
+                    }
+                    return
+                }
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                let rows = try decoder.decode([SupabaseFocusRow].self, from: data)
+                await MainActor.run {
+                    importedFocuses = rows
+                    isImporting = false
+                }
+            } catch {
+                await MainActor.run {
+                    importError = "Fallo al importar: \(error.localizedDescription)"
+                    isImporting = false
+                }
+            }
+        }
+    }
+
+    private var headerRow: some View {
+        HStack {
+            Text("id").bold()
+            Text("Descripcion").bold()
+            Text("Tipo Asociado").bold()
+            Text("Prioridad").bold()
+            Text("Duracion Estim.").bold()
+            Text("Trabajado").bold()
+        }
+        .font(.caption)
+    }
+}
+
+struct SupabaseFocusRow: Identifiable, Codable {
+    let id: Int64
+    let descripcion: String?
+    let tipoAsociado: String?
+    let prioridad: Int?
+    let duracionEstimanda: Int?
+    let trabajado: Int?
 }
