@@ -1786,8 +1786,10 @@ struct FocusDiagnosticsView: View {
             Form {
                 Section("Herramientas de exportación") {
                     Button {
-                        exportedCSV = generateCSV()
+                        let csv = generateCSV()
+                        exportedCSV = csv
                         lastExportDate = Date()
+                        UIPasteboard.general.string = csv
                     } label: {
                         Label("Export to CSV", systemImage: "arrow.down.doc")
                             .font(.headline)
@@ -1797,10 +1799,20 @@ struct FocusDiagnosticsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    TextEditor(text: $exportedCSV)
-                        .frame(minHeight: 220)
-                        .font(.system(.body, design: .monospaced))
-                        .accessibilityLabel("Salida CSV")
+                    ScrollView {
+                        Text(exportedCSV.isEmpty ? "Pulsa \"Export to CSV\" para generar el archivo." : exportedCSV)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
+                    .frame(minHeight: 220)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(UIColor.secondarySystemBackground)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.4))
+                    )
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Contenido CSV exportado")
                 }
                 Section("Formato esperado") {
                     Text("id, Descripcion, Tipo Asociado, Prioridad, Duracion Estimanda, Trabajado")
