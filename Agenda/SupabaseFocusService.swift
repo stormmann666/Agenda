@@ -66,7 +66,7 @@ final class SupabaseFocusService: FocusRemoteService {
         let rows: [SupabaseFocusRow] = try await client.database.from("focuses").select().execute().value
         return rows
         #else
-        guard let url = URL(string: projectURL.absoluteString + "/rest/v1/focuses?select=*") else {
+        guard let url = URL(string: projectURL.absoluteString + "/rest/v1/Focuses?select=*") else {
             throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"])
         }
         var request = URLRequest(url: url)
