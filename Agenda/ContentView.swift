@@ -1975,4 +1975,13 @@ struct SupabaseFocusRow: Identifiable, Codable {
     let prioridad: Int?
     let duracionEstimanda: Int?
     let trabajado: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case descripcion = "Descripcion"
+        case tipoAsociado = "Tipo Asociado"
+        case prioridad = "Prioridad"
+        case duracionEstimanda = "Duracion Estimada"
+        case trabajado = "Trabajado"
+    }
 }
