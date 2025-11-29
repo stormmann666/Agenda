@@ -1922,12 +1922,15 @@ struct FocusDiagnosticsView: View {
         request.addValue(apiKey, forHTTPHeaderField: "apikey")
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
+        print("[SupabaseImport] Launching request: \(url.absoluteString)")
         Task {
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
                       200..<300 ~= httpResponse.statusCode else {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    let bodySnippet = String(data: data, encoding: .utf8) ?? "<sin cuerpo legible>"
+                    print("[SupabaseImport] Server error \(status). Body: \(bodySnippet)")
                     await MainActor.run {
                         importError = "Error del servidor (\(status))."
                         isImporting = false
@@ -1937,11 +1940,13 @@ struct FocusDiagnosticsView: View {
                 let decoder = JSONDecoder()
                 decoder.keyDecodingStrategy = .convertFromSnakeCase
                 let rows = try decoder.decode([SupabaseFocusRow].self, from: data)
+                print("[SupabaseImport] Recibidas \(rows.count) filas.")
                 await MainActor.run {
                     importedFocuses = rows
                     isImporting = false
                 }
             } catch {
+                print("[SupabaseImport] Fallo inesperado: \(error)")
                 await MainActor.run {
                     importError = "Fallo al importar: \(error.localizedDescription)"
                     isImporting = false
