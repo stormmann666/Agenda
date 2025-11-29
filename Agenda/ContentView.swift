@@ -1639,6 +1639,35 @@ struct FocusPriorityAdjustView: View {
         viewModel.focuses.filter { !($0.isCompleted ?? false) }
     }
 
+    private var groupedFocuses: [FocusPrioritySection] {
+        let grouped = Dictionary(grouping: editableFocuses, by: { $0.proposedCategoryID })
+        return grouped.map { key, focuses in
+            let ordered = focuses.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            if let categoryID = key,
+               let category = viewModel.category(for: categoryID) {
+                return FocusPrioritySection(id: categoryID.uuidString,
+                                            title: category.name,
+                                            color: category.color,
+                                            focuses: ordered,
+                                            isIndeterminate: false)
+            } else {
+                return FocusPrioritySection(id: "indeterminado",
+                                            title: "Indeterminado",
+                                            color: nil,
+                                            focuses: ordered,
+                                            isIndeterminate: true)
+            }
+        }
+        .sorted { lhs, rhs in
+            if lhs.isIndeterminate != rhs.isIndeterminate {
+                return !lhs.isIndeterminate && rhs.isIndeterminate
+            }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
     var body: some View {
         List {
             if editableFocuses.isEmpty {
@@ -1646,12 +1675,33 @@ struct FocusPriorityAdjustView: View {
                                        systemImage: "target",
                                        description: Text("Añade o reactiva focuses para ajustar prioridades."))
             } else {
-                Section("Arrastra el control para ajustar la prioridad") {
-                    ForEach(editableFocuses) { focus in
-                        FocusPriorityRow(focus: focus) { newPriority in
-                            var updated = focus
-                            updated.priority = newPriority
-                            viewModel.updateFocus(updated)
+                ForEach(groupedFocuses) { section in
+                    Section {
+                        ForEach(section.focuses) { focus in
+                            FocusPriorityRow(focus: focus) { newPriority in
+                                var updated = focus
+                                updated.priority = newPriority
+                                viewModel.updateFocus(updated)
+                            }
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            if let color = section.color {
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 10, height: 10)
+                            } else {
+                                Circle()
+                                    .stroke(Color.secondary, lineWidth: 1)
+                                    .frame(width: 10, height: 10)
+                            }
+                            Text(section.title)
+                        }
+                    } footer: {
+                        if section.isIndeterminate {
+                            Text("Focuses sin tipo propuesto.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -1666,6 +1716,14 @@ struct FocusPriorityAdjustView: View {
             }
         }
     }
+}
+
+private struct FocusPrioritySection: Identifiable {
+    let id: String
+    let title: String
+    let color: Color?
+    let focuses: [FocusItem]
+    let isIndeterminate: Bool
 }
 
 private struct FocusPriorityRow: View {
