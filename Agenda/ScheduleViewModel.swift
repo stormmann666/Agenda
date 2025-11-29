@@ -908,6 +908,26 @@ extension UserDefaultsFocusStorage: FocusRemoteService {
     func exportFocuses(_ focuses: [FocusItem]) async throws {
         saveFocuses(focuses)
     }
+
+    func createFocus(_ focus: FocusItem) async throws {
+        var current = loadFocuses()
+        current.append(focus)
+        saveFocuses(current)
+    }
+
+    func updateFocus(_ focus: FocusItem) async throws {
+        var current = loadFocuses()
+        if let index = current.firstIndex(where: { $0.id == focus.id }) {
+            current[index] = focus
+            saveFocuses(current)
+        }
+    }
+
+    func deleteFocus(_ focusID: UUID) async throws {
+        var current = loadFocuses()
+        current.removeAll { $0.id == focusID }
+        saveFocuses(current)
+    }
 }
 
 private extension Date {
