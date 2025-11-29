@@ -8,6 +8,11 @@
 import SwiftUI
 import UIKit
 
+protocol FocusStorageProvider {
+    func loadFocuses() -> [FocusItem]
+    func saveFocuses(_ focuses: [FocusItem])
+}
+
 struct TaskCategory: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
@@ -170,13 +175,16 @@ final class ScheduleViewModel: ObservableObject {
     private var calendar: Calendar
     private let defaults: UserDefaults
     private let fallbackDefaults = UserDefaults.standard
+    private let focusStorage: FocusStorageProvider
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
-         calendar: Calendar = Calendar.current) {
+         calendar: Calendar = Calendar.current,
+         focusStorage: FocusStorageProvider? = nil) {
         var normalizedCalendar = calendar
         normalizedCalendar.timeZone = TimeZone.current
         self.calendar = normalizedCalendar
         self.defaults = defaults
+        self.focusStorage = focusStorage ?? UserDefaultsFocusStorage(defaults: defaults, key: focusesKey)
         categories = []
         tasks = []
         dayLogs = []
@@ -712,18 +720,11 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     private func loadFocuses() -> [FocusItem] {
-        guard
-            let data = defaults.data(forKey: focusesKey),
-            let decoded = try? JSONDecoder().decode([FocusItem].self, from: data)
-        else {
-            return []
-        }
-        return decoded
+        focusStorage.loadFocuses()
     }
 
     private func saveFocuses() {
-        guard let data = try? JSONEncoder().encode(focuses) else { return }
-        defaults.set(data, forKey: focusesKey)
+        focusStorage.saveFocuses(focuses)
     }
 
     private func nextAvailableStart(after date: Date) -> Int? {
@@ -868,6 +869,26 @@ struct ScheduleDayLog: Identifiable, Codable {
         self.id = id
         self.date = date
         self.tasks = tasks
+    }
+}
+
+struct UserDefaultsFocusStorage: FocusStorageProvider {
+    let defaults: UserDefaults
+    let key: String
+
+    func loadFocuses() -> [FocusItem] {
+        guard
+            let data = defaults.data(forKey: key),
+            let decoded = try? JSONDecoder().decode([FocusItem].self, from: data)
+        else {
+            return []
+        }
+        return decoded
+    }
+
+    func saveFocuses(_ focuses: [FocusItem]) {
+        guard let data = try? JSONEncoder().encode(focuses) else { return }
+        defaults.set(data, forKey: key)
     }
 }
 
