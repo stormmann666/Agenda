@@ -909,6 +909,7 @@ struct FocusManagerView: View {
     @State private var focusSortMode: FocusSortMode = .defaultOrder
     @State private var focusActionMessage: String?
     @State private var recentlyScheduledFocusID: UUID?
+    @State private var showingPriorityAdjuster = false
 
     var body: some View {
         NavigationStack {
@@ -930,6 +931,13 @@ struct FocusManagerView: View {
             }
             .navigationTitle("Focuses")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showingPriorityAdjuster = true
+                    } label: {
+                        Label("Prioridades", systemImage: "slider.horizontal.3")
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showingAddFocus = true
@@ -1073,6 +1081,11 @@ struct FocusManagerView: View {
                 }
                 .onDisappear {
                     resetEditFocusState()
+                }
+            }
+            .sheet(isPresented: $showingPriorityAdjuster) {
+                NavigationStack {
+                    FocusPriorityAdjustView(viewModel: viewModel)
                 }
             }
             .alert("Focus", isPresented: Binding(
@@ -1615,5 +1628,88 @@ struct HourMarkerView: View {
                 .frame(height: 1)
         }
         .padding(.horizontal)
+    }
+}
+
+struct FocusPriorityAdjustView: View {
+    @ObservedObject var viewModel: ScheduleViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var editableFocuses: [FocusItem] {
+        viewModel.focuses.filter { !($0.isCompleted ?? false) }
+    }
+
+    var body: some View {
+        List {
+            if editableFocuses.isEmpty {
+                ContentUnavailableView("No hay focuses pendientes",
+                                       systemImage: "target",
+                                       description: Text("Añade o reactiva focuses para ajustar prioridades."))
+            } else {
+                Section("Arrastra el control para ajustar la prioridad") {
+                    ForEach(editableFocuses) { focus in
+                        FocusPriorityRow(focus: focus) { newPriority in
+                            var updated = focus
+                            updated.priority = newPriority
+                            viewModel.updateFocus(updated)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Prioridades")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Cerrar") {
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+
+private struct FocusPriorityRow: View {
+    let focus: FocusItem
+    var onPriorityChange: (Int) -> Void
+    @State private var sliderValue: Double
+
+    init(focus: FocusItem, onPriorityChange: @escaping (Int) -> Void) {
+        self.focus = focus
+        self.onPriorityChange = onPriorityChange
+        _sliderValue = State(initialValue: Double(focus.priority))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(focus.name)
+                    .font(.headline)
+                Spacer()
+                Text(priorityDescription)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+            Slider(value: $sliderValue, in: 0...5, step: 1)
+                .tint(.orange)
+                .accessibilityLabel("Prioridad para \(focus.name)")
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 6)
+        .onChange(of: sliderValue) { newValue in
+            let clamped = Int(newValue.rounded())
+            if clamped != focus.priority {
+                onPriorityChange(clamped)
+            }
+        }
+        .onChange(of: focus.priority) { newPriority in
+            sliderValue = Double(newPriority)
+        }
+    }
+
+    private var priorityDescription: String {
+        if focus.priority <= 0 {
+            return "Prioridad baja"
+        }
+        return String(repeating: "★", count: min(focus.priority, 5))
     }
 }
