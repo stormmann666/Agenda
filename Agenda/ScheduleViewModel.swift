@@ -13,6 +13,11 @@ protocol FocusStorageProvider {
     func saveFocuses(_ focuses: [FocusItem])
 }
 
+protocol FocusRemoteService {
+    func importFocuses() async throws -> [FocusItem]
+    func exportFocuses(_ focuses: [FocusItem]) async throws
+}
+
 struct TaskCategory: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
@@ -889,6 +894,16 @@ struct UserDefaultsFocusStorage: FocusStorageProvider {
     func saveFocuses(_ focuses: [FocusItem]) {
         guard let data = try? JSONEncoder().encode(focuses) else { return }
         defaults.set(data, forKey: key)
+    }
+}
+
+extension UserDefaultsFocusStorage: FocusRemoteService {
+    func importFocuses() async throws -> [FocusItem] {
+        loadFocuses()
+    }
+
+    func exportFocuses(_ focuses: [FocusItem]) async throws {
+        saveFocuses(focuses)
     }
 }
 

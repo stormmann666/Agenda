@@ -1783,6 +1783,7 @@ struct FocusDiagnosticsView: View {
     @State private var importedFocuses: [SupabaseFocusRow] = []
     @State private var isImporting = false
     @State private var importError: String?
+    private let remoteService = SupabaseFocusService.shared
 
     var body: some View {
         NavigationStack {
@@ -1848,7 +1849,6 @@ struct FocusDiagnosticsView: View {
                                 Divider()
                                 ForEach(importedFocuses) { row in
                                     HStack {
-                                        Text("\(row.id)")
                                         Text(row.descripcion ?? "-")
                                         Text(row.tipoAsociado ?? "-")
                                         Text("\(row.prioridad ?? 0)")
@@ -1876,7 +1876,7 @@ struct FocusDiagnosticsView: View {
 
     private func generateCSV() -> String {
         var lines: [String] = []
-        lines.append("id,Descripcion,Tipo Asociado,Prioridad,Duracion Estimada,Trabajado")
+        lines.append("id,Descripcion,Tipo Asociado,Prioridad,Duracion Estimanda,Trabajado")
         for focus in viewModel.focuses {
             let idField = csvField(numericID(for: focus))
             let descriptionField = csvField(focus.name)
@@ -1909,46 +1909,21 @@ struct FocusDiagnosticsView: View {
     }
 
     private func fetchFocusesFromSupabase() {
-        guard let url = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co/rest/v1/Focuses?select=*") else {
-            importError = "URL inválida."
-            return
-        }
         isImporting = true
         importError = nil
-        let apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdweWxjdXFvdmZ5amJocHR0Y3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDYwOTcsImV4cCI6MjA3OTkyMjA5N30.M0pslu02-ZJPU-ypyNSGhafo2KheVqEOl_NPhYOkD5g"
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.addValue("application/json", forHTTPHeaderField: "Accept")
-        request.addValue(apiKey, forHTTPHeaderField: "apikey")
-        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        print("[SupabaseImport] Launching request: \(url.absoluteString)")
+        print("[SupabaseImport] Iniciando importación...")
         Task {
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse,
-                      200..<300 ~= httpResponse.statusCode else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    let bodySnippet = String(data: data, encoding: .utf8) ?? "<sin cuerpo legible>"
-                    print("[SupabaseImport] Server error \(status). Body: \(bodySnippet)")
-                    await MainActor.run {
-                        importError = "Error del servidor (\(status))."
-                        isImporting = false
-                    }
-                    return
-                }
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                let rows = try decoder.decode([SupabaseFocusRow].self, from: data)
+                let rows = try await remoteService.fetchRemoteRows()
                 print("[SupabaseImport] Recibidas \(rows.count) filas.")
                 await MainActor.run {
                     importedFocuses = rows
                     isImporting = false
                 }
             } catch {
-                print("[SupabaseImport] Fallo inesperado: \(error)")
+                print("[SupabaseImport] Error: \(error)")
                 await MainActor.run {
-                    importError = "Fallo al importar: \(error.localizedDescription)"
+                    importError = error.localizedDescription
                     isImporting = false
                 }
             }
@@ -1957,7 +1932,6 @@ struct FocusDiagnosticsView: View {
 
     private var headerRow: some View {
         HStack {
-            Text("id").bold()
             Text("Descripcion").bold()
             Text("Tipo Asociado").bold()
             Text("Prioridad").bold()
@@ -1965,23 +1939,5 @@ struct FocusDiagnosticsView: View {
             Text("Trabajado").bold()
         }
         .font(.caption)
-    }
-}
-
-struct SupabaseFocusRow: Identifiable, Codable {
-    let id: Int64
-    let descripcion: String?
-    let tipoAsociado: String?
-    let prioridad: Int?
-    let duracionEstimanda: Int?
-    let trabajado: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case id = "id"
-        case descripcion = "Descripcion"
-        case tipoAsociado = "Tipo Asociado"
-        case prioridad = "Prioridad"
-        case duracionEstimanda = "Duracion Estimada"
-        case trabajado = "Trabajado"
     }
 }
