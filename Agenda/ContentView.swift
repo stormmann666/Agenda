@@ -25,6 +25,10 @@ struct ContentView: View {
                 .tabItem {
                     Label("Focuses", systemImage: "target")
                 }
+            FocusDiagnosticsView(viewModel: viewModel)
+                .tabItem {
+                    Label("Ayuda", systemImage: "questionmark.circle")
+                }
         }
     }
 }
@@ -1769,5 +1773,73 @@ private struct FocusPriorityRow: View {
             return "Prioridad baja"
         }
         return String(repeating: "★", count: min(focus.priority, 5))
+    }
+}
+
+struct FocusDiagnosticsView: View {
+    @ObservedObject var viewModel: ScheduleViewModel
+    @State private var exportedCSV: String = ""
+    @State private var lastExportDate: Date?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Herramientas de exportación") {
+                    Button {
+                        exportedCSV = generateCSV()
+                        lastExportDate = Date()
+                    } label: {
+                        Label("Export to CSV", systemImage: "arrow.down.doc")
+                            .font(.headline)
+                    }
+                    if let timestamp = lastExportDate {
+                        Text("Generado: \(timestamp.formatted(date: .omitted, time: .standard))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: $exportedCSV)
+                        .frame(minHeight: 220)
+                        .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Salida CSV")
+                }
+                Section("Formato esperado") {
+                    Text("id(int8), Descripcion(text), Tipo Asociado(text), Prioridad(int2), Duracion Estimada(int4), Trabajado(int8)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Ayuda / CSV")
+            .onAppear {
+                if exportedCSV.isEmpty {
+                    exportedCSV = generateCSV()
+                }
+            }
+        }
+    }
+
+    private func generateCSV() -> String {
+        var lines: [String] = []
+        lines.append("id(int8),Descripcion(text),Tipo Asociado(text),Prioridad(int2),Duracion Estimada(int4),Trabajado(int8)")
+        for focus in viewModel.focuses {
+            let idField = csvField(focus.id.uuidString)
+            let descriptionField = csvField(focus.name)
+            let typeName = focus.proposedCategoryID.flatMap { viewModel.category(for: $0)?.name } ?? "Indeterminado"
+            let typeField = csvField(typeName)
+            let priorityField = "\(focus.priority)"
+            let estimatedField = "\(focus.expectedMinutes ?? 0)"
+            let actualField = "\(focus.actualMinutes ?? 0)"
+            let row = [idField, descriptionField, typeField, priorityField, estimatedField, actualField].joined(separator: ",")
+            lines.append(row)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func csvField(_ value: String) -> String {
+        let sanitized = value.replacingOccurrences(of: "\"", with: "\"\"")
+        if sanitized.contains(",") || sanitized.contains("\"") || sanitized.contains("\n") {
+            return "\"\(sanitized)\""
+        } else {
+            return sanitized
+        }
     }
 }
