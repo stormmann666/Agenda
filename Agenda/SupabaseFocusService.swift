@@ -58,19 +58,36 @@ final class SupabaseFocusService: FocusRemoteService {
     }
 
     func exportFocuses(_ focuses: [FocusItem]) async throws {
-        // Placeholder
+        for focus in focuses {
+            try await createFocus(focus)
+        }
     }
 
     func createFocus(_ focus: FocusItem) async throws {
-        // Placeholder
+        let payload = focusPayload(from: focus)
+        #if canImport(Supabase)
+        try await client.database.from("focuses").insert(payload).execute()
+        #else
+        try await performREST(method: "POST", body: payload)
+        #endif
     }
 
     func updateFocus(_ focus: FocusItem) async throws {
-        // Placeholder
+        let payload = focusPayload(from: focus)
+        #if canImport(Supabase)
+        try await client.database.from("focuses").update(payload).eq("id", value: numericID(for: focus)).execute()
+        #else
+        try await performREST(method: "PATCH", body: payload, id: numericID(for: focus))
+        #endif
     }
 
     func deleteFocus(_ focusID: UUID) async throws {
-        // Placeholder
+        let identifier = numericID(from: focusID)
+        #if canImport(Supabase)
+        try await client.database.from("focuses").delete().eq("id", value: identifier).execute()
+        #else
+        try await performREST(method: "DELETE", id: identifier)
+        #endif
     }
 
     func fetchRemoteRows() async throws -> [SupabaseFocusRow] {
@@ -98,7 +115,11 @@ final class SupabaseFocusService: FocusRemoteService {
     }
 
     private func numericID(for focus: FocusItem) -> String {
-        let hex = focus.id.uuidString.replacingOccurrences(of: "-", with: "")
+        numericID(from: focus.id)
+    }
+
+    private func numericID(from uuid: UUID) -> String {
+        let hex = uuid.uuidString.replacingOccurrences(of: "-", with: "")
         return String(hex.prefix(16))
     }
 
