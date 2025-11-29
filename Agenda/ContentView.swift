@@ -907,6 +907,7 @@ struct FocusManagerView: View {
     @FocusState private var focusFieldFocused: Bool
     @FocusState private var hoursFieldFocused: Bool
     @State private var focusSortMode: FocusSortMode = .defaultOrder
+    @State private var focusActionMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -1073,6 +1074,20 @@ struct FocusManagerView: View {
                     resetEditFocusState()
                 }
             }
+            .alert("Focus", isPresented: Binding(
+                get: { focusActionMessage != nil },
+                set: { newValue in
+                    if !newValue {
+                        focusActionMessage = nil
+                    }
+                })
+            ) {
+                Button("Aceptar", role: .cancel) {
+                    focusActionMessage = nil
+                }
+            } message: {
+                Text(focusActionMessage ?? "")
+            }
         }
     }
 
@@ -1182,6 +1197,9 @@ struct FocusManagerView: View {
         .listRowBackground(indicatorColor.opacity(0.12))
         .onTapGesture(count: 2) {
             editingFocus = focus
+        }
+        .onLongPressGesture(minimumDuration: 0.45) {
+            handleFocusQuickSchedule(focus)
         }
     }
 
@@ -1322,6 +1340,17 @@ struct FocusManagerView: View {
         } else {
             ProgressView(value: 0)
                 .tint(.gray)
+        }
+    }
+
+    private func handleFocusQuickSchedule(_ focus: FocusItem) {
+        guard let proposedID = focus.proposedCategoryID,
+              viewModel.category(for: proposedID) != nil else {
+            focusActionMessage = "Este focus necesita un tipo propuesto antes de poder crear un box."
+            return
+        }
+        if viewModel.scheduleFocusAtCurrentTime(focus) == nil {
+            focusActionMessage = "No hay espacio disponible ahora mismo para añadir este focus al horario."
         }
     }
 }
