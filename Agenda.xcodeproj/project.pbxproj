@@ -10,6 +10,11 @@
 		C8A9B7DC2ED5CCDC0082358E /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8A9B7DB2ED5CCDC0082358E /* WidgetKit.framework */; };
 		C8A9B7DE2ED5CCDC0082358E /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8A9B7DD2ED5CCDC0082358E /* SwiftUI.framework */; };
 		C8A9B7EF2ED5CCDF0082358E /* AgendaWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8A9B7D92ED5CCDC0082358E /* AgendaWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C8A9B9322EDB075F0082358E /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = C8A9B9312EDB075F0082358E /* Auth */; };
+		C8A9B9342EDB075F0082358E /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = C8A9B9332EDB075F0082358E /* Functions */; };
+		C8A9B9362EDB075F0082358E /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = C8A9B9352EDB075F0082358E /* PostgREST */; };
+		C8A9B9382EDB075F0082358E /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = C8A9B9372EDB075F0082358E /* Realtime */; };
+		C8A9B93A2EDB075F0082358E /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = C8A9B9392EDB075F0082358E /* Storage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +92,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C8A9B9362EDB075F0082358E /* PostgREST in Frameworks */,
+				C8A9B9342EDB075F0082358E /* Functions in Frameworks */,
+				C8A9B9322EDB075F0082358E /* Auth in Frameworks */,
+				C8A9B93A2EDB075F0082358E /* Storage in Frameworks */,
+				C8A9B9382EDB075F0082358E /* Realtime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -161,6 +171,11 @@
 			);
 			name = Agenda;
 			packageProductDependencies = (
+				C8A9B9312EDB075F0082358E /* Auth */,
+				C8A9B9332EDB075F0082358E /* Functions */,
+				C8A9B9352EDB075F0082358E /* PostgREST */,
+				C8A9B9372EDB075F0082358E /* Realtime */,
+				C8A9B9392EDB075F0082358E /* Storage */,
 			);
 			productName = Agenda;
 			productReference = C8A9B7672ED182980082358E /* Agenda.app */;
@@ -242,6 +257,9 @@
 			);
 			mainGroup = C8A9B75E2ED182980082358E;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C8A9B7682ED182980082358E /* Products */;
 			projectDirPath = "";
@@ -650,6 +668,45 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C8A9B9312EDB075F0082358E /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		C8A9B9332EDB075F0082358E /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		C8A9B9352EDB075F0082358E /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		C8A9B9372EDB075F0082358E /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		C8A9B9392EDB075F0082358E /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8A9B9302EDB075F0082358E /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C8A9B75F2ED182980082358E /* Project object */;
 }
