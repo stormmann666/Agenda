@@ -51,14 +51,26 @@ final class SupabaseFocusService: FocusRemoteService {
             FocusItem(id: UUID(),
                       name: row.descripcion ?? "Focus remoto",
                       expectedMinutes: row.duracionEstimanda,
-                      actualMinutes: row.trabajado.map { Int($0) },
+                      actualMinutes: row.trabajado ?? 0,
                       taskIDs: [],
                       priority: row.prioridad ?? 0)
         }
     }
 
     func exportFocuses(_ focuses: [FocusItem]) async throws {
-        // Placeholder: implement when Supabase table is ready for upserts.
+        // Placeholder
+    }
+
+    func createFocus(_ focus: FocusItem) async throws {
+        // Placeholder
+    }
+
+    func updateFocus(_ focus: FocusItem) async throws {
+        // Placeholder
+    }
+
+    func deleteFocus(_ focusID: UUID) async throws {
+        // Placeholder
     }
 
     func fetchRemoteRows() async throws -> [SupabaseFocusRow] {
@@ -83,5 +95,43 @@ final class SupabaseFocusService: FocusRemoteService {
         let decoder = JSONDecoder()
         return try decoder.decode([SupabaseFocusRow].self, from: data)
         #endif
+    }
+
+    private func numericID(for focus: FocusItem) -> String {
+        let hex = focus.id.uuidString.replacingOccurrences(of: "-", with: "")
+        return String(hex.prefix(16))
+    }
+
+    private func focusPayload(from focus: FocusItem) -> [String: Any] {
+        return [
+            "id": numericID(for: focus),
+            "Descripcion": focus.name,
+            "Prioridad": focus.priority,
+            "Duracion Estimada": focus.expectedMinutes ?? 0,
+            "Trabajado": focus.actualMinutes ?? 0
+        ]
+    }
+
+    private func performREST(method: String, body: [String: Any]? = nil, id: String? = nil) async throws {
+        var endpoint = projectURL.absoluteString + "/rest/v1/focuses"
+        if let id = id {
+            endpoint += "?id=eq.\(id)"
+        }
+        guard let url = URL(string: endpoint) else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"])
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue(apiKey, forHTTPHeaderField: "apikey")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+        }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw NSError(domain: "SupabaseService", code: status, userInfo: [NSLocalizedDescriptionKey: "Error del servidor (\(status))"])
+        }
     }
 }

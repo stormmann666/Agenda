@@ -16,6 +16,9 @@ protocol FocusStorageProvider {
 protocol FocusRemoteService {
     func importFocuses() async throws -> [FocusItem]
     func exportFocuses(_ focuses: [FocusItem]) async throws
+    func createFocus(_ focus: FocusItem) async throws
+    func updateFocus(_ focus: FocusItem) async throws
+    func deleteFocus(_ focusID: UUID) async throws
 }
 
 struct TaskCategory: Identifiable, Codable, Hashable {
