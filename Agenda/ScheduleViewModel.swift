@@ -454,6 +454,16 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func scheduleFocusAtCurrentTime(_ focus: FocusItem, referenceDate: Date = Date()) -> TaskItem? {
+        guard let categoryID = focus.proposedCategoryID,
+              let category = category(for: categoryID) else { return nil }
+        guard let startIndex = nextAvailableStart(after: referenceDate) else { return nil }
+        guard let newTask = addTask(at: startIndex, category: category) else { return nil }
+        assignFocus(focus, to: newTask)
+        return task(with: newTask.id)
+    }
+
     func logFocusUsage(_ focus: FocusItem, minutes: Int) {
         guard minutes > 0 else { return }
         mutateFocuses { focuses in
@@ -714,6 +724,43 @@ final class ScheduleViewModel: ObservableObject {
     private func saveFocuses() {
         guard let data = try? JSONEncoder().encode(focuses) else { return }
         defaults.set(data, forKey: focusesKey)
+    }
+
+    private func nextAvailableStart(after date: Date) -> Int? {
+        guard totalBlocks > 0 else { return nil }
+        guard var candidate = blockIndex(for: date) else { return nil }
+        if let overlapping = taskOccupying(block: candidate) {
+            candidate = overlapping.startIndex + overlapping.duration
+        }
+        while candidate < totalBlocks {
+            if canPlace(start: candidate, duration: 1) {
+                return candidate
+            }
+            if let blocking = taskOccupying(block: candidate) {
+                candidate = blocking.startIndex + blocking.duration
+            } else {
+                candidate += 1
+            }
+        }
+        return nil
+    }
+
+    private func blockIndex(for date: Date) -> Int? {
+        let blockSeconds = Double(Self.blockMinutes) * 60
+        let diff = date.timeIntervalSince(dayStart)
+        if diff < 0 {
+            return 0
+        }
+        let index = Int(diff / blockSeconds)
+        guard index < totalBlocks else { return nil }
+        return index
+    }
+
+    private func taskOccupying(block index: Int) -> TaskItem? {
+        guard index >= 0 else { return nil }
+        return tasks.first { task in
+            index >= task.startIndex && index < task.startIndex + task.duration
+        }
     }
 
     private func cleanupFocusAssignments() {
