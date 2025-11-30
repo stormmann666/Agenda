@@ -263,7 +263,9 @@ final class ScheduleViewModel: ObservableObject {
         }
         dayLogs = loadedLogs
         cleanupFocusAssignments()
-        importFocusesFromRemote()
+        Task { [weak self] in
+            await self?.refreshFocusesFromRemote()
+        }
     }
 
     var totalBlocks: Int {
@@ -784,28 +786,24 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
-    private func importFocusesFromRemote() {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let remoteFocuses = try await self.focusService.importFocuses()
-                await MainActor.run {
-                    var merged = self.focuses
-                    for focus in remoteFocuses {
-                        if let index = merged.firstIndex(where: { $0.id == focus.id }) {
-                            merged[index] = focus
-                        } else {
-                            merged.append(focus)
-                        }
-                    }
-                    self.applyFocusChanges(merged, shouldSyncRemote: false)
-                    self.cleanupFocusAssignments()
+    @MainActor
+    func refreshFocusesFromRemote() async {
+        do {
+            let remoteFocuses = try await focusService.importFocuses()
+            var merged = focuses
+            for focus in remoteFocuses {
+                if let index = merged.firstIndex(where: { $0.id == focus.id }) {
+                    merged[index] = focus
+                } else {
+                    merged.append(focus)
                 }
-            } catch {
-                #if DEBUG
-                print("Focus import failed: \(error)")
-                #endif
             }
+            applyFocusChanges(merged, shouldSyncRemote: false)
+            cleanupFocusAssignments()
+        } catch {
+            #if DEBUG
+            print("Focus import failed: \(error)")
+            #endif
         }
     }
 
