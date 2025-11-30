@@ -1276,9 +1276,10 @@ struct FocusManagerView: View {
     }
 
     private var filteredFocuses: [FocusItem] {
-        viewModel.focuses.filter { focus in
+        let active = viewModel.focuses.filter { focus in
             !(focus.isCompleted ?? false)
         }
+        return Array(active.reversed())
     }
 
     private var prioritySortedFocuses: [FocusItem] {
