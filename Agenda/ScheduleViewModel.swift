@@ -183,16 +183,19 @@ final class ScheduleViewModel: ObservableObject {
     private var calendar: Calendar
     private let defaults: UserDefaults
     private let fallbackDefaults = UserDefaults.standard
-    private let focusStorage: FocusStorageProvider
+    private let focusService: FocusRemoteService
+    private let focusCache: FocusStorageProvider?
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current,
-         focusStorage: FocusStorageProvider? = nil) {
+         focusService: FocusRemoteService? = nil) {
         var normalizedCalendar = calendar
         normalizedCalendar.timeZone = TimeZone.current
         self.calendar = normalizedCalendar
         self.defaults = defaults
-        self.focusStorage = focusStorage ?? UserDefaultsFocusStorage(defaults: defaults, key: focusesKey)
+        let resolvedFocusService = focusService ?? UserDefaultsFocusStorage(defaults: defaults, key: focusesKey)
+        self.focusService = resolvedFocusService
+        self.focusCache = resolvedFocusService as? FocusStorageProvider
         categories = []
         tasks = []
         dayLogs = []
@@ -216,7 +219,7 @@ final class ScheduleViewModel: ObservableObject {
         migrateLegacyDataIfNeeded()
 
         categories = loadCategories()
-        focuses = loadFocuses()
+        focuses = loadCachedFocuses()
         var loadedTasks = loadTasks()
         var loadedLogs = loadDayLogs()
 
@@ -252,6 +255,7 @@ final class ScheduleViewModel: ObservableObject {
         }
         dayLogs = loadedLogs
         cleanupFocusAssignments()
+        importFocusesFromRemote()
     }
 
     var totalBlocks: Int {
@@ -690,8 +694,7 @@ final class ScheduleViewModel: ObservableObject {
     private func mutateFocuses(_ transform: (inout [FocusItem]) -> Void) {
         var updated = focuses
         transform(&updated)
-        focuses = updated
-        saveFocuses()
+        applyFocusChanges(updated)
     }
 
     private func loadCategories() -> [TaskCategory] {
@@ -733,12 +736,69 @@ final class ScheduleViewModel: ObservableObject {
         defaults.set(data, forKey: categoriesKey)
     }
 
-    private func loadFocuses() -> [FocusItem] {
-        focusStorage.loadFocuses()
+    private func loadCachedFocuses() -> [FocusItem] {
+        focusCache?.loadFocuses() ?? []
     }
 
-    private func saveFocuses() {
-        focusStorage.saveFocuses(focuses)
+    private func applyFocusChanges(_ updated: [FocusItem], shouldSyncRemote: Bool = true) {
+        guard updated != focuses else { return }
+        let previous = focuses
+        focuses = updated
+        focusCache?.saveFocuses(updated)
+        if shouldSyncRemote {
+            syncFocuses(previous: previous, updated: updated)
+        }
+    }
+
+    private func syncFocuses(previous: [FocusItem], updated: [FocusItem]) {
+        let service = focusService
+        Task {
+            do {
+                let previousMap = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
+                let updatedIDs = Set(updated.map { $0.id })
+                for focus in updated {
+                    if let existing = previousMap[focus.id] {
+                        if existing != focus {
+                            try await service.updateFocus(focus)
+                        }
+                    } else {
+                        try await service.createFocus(focus)
+                    }
+                }
+                for removed in previous where !updatedIDs.contains(removed.id) {
+                    try await service.deleteFocus(removed.id)
+                }
+            } catch {
+                #if DEBUG
+                print("Focus sync failed: \(error)")
+                #endif
+            }
+        }
+    }
+
+    private func importFocusesFromRemote() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let remoteFocuses = try await self.focusService.importFocuses()
+                await MainActor.run {
+                    var merged = self.focuses
+                    for focus in remoteFocuses {
+                        if let index = merged.firstIndex(where: { $0.id == focus.id }) {
+                            merged[index] = focus
+                        } else {
+                            merged.append(focus)
+                        }
+                    }
+                    self.applyFocusChanges(merged, shouldSyncRemote: false)
+                    self.cleanupFocusAssignments()
+                }
+            } catch {
+                #if DEBUG
+                print("Focus import failed: \(error)")
+                #endif
+            }
+        }
     }
 
     private func nextAvailableStart(after date: Date) -> Int? {
@@ -791,8 +851,7 @@ final class ScheduleViewModel: ObservableObject {
             }
         }
         if changed {
-            focuses = updated
-            saveFocuses()
+            applyFocusChanges(updated)
         }
     }
 
