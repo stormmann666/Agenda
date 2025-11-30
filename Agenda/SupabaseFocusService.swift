@@ -161,10 +161,11 @@ final class SupabaseFocusService: FocusRemoteService {
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         }
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(domain: "SupabaseService", code: status, userInfo: [NSLocalizedDescriptionKey: "Error del servidor (\(status))"])
+            let snippet = String(data: data, encoding: .utf8) ?? "<sin cuerpo>"
+            throw NSError(domain: "SupabaseService", code: status, userInfo: [NSLocalizedDescriptionKey: "Error del servidor (\(status)): \(snippet)"])
         }
     }
 }
