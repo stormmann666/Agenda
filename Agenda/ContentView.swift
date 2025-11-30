@@ -1129,6 +1129,9 @@ struct FocusManagerView: View {
             } message: {
                 Text(focusActionMessage ?? "")
             }
+            .refreshable {
+                await viewModel.refreshFocusesFromRemote()
+            }
         }
     }
 
