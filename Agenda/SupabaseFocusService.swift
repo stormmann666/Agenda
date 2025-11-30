@@ -38,6 +38,7 @@ final class SupabaseFocusService: FocusRemoteService {
 
     private let projectURL = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co")!
     private let apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdweWxjdXFvdmZ5amJocHR0Y3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDYwOTcsImV4cCI6MjA3OTkyMjA5N30.M0pslu02-ZJPU-ypyNSGhafo2KheVqEOl_NPhYOkD5g"
+    private var categoryResolver: ((String) -> UUID?)?
 
     private init() {
         #if canImport(Supabase)
@@ -45,14 +46,20 @@ final class SupabaseFocusService: FocusRemoteService {
         #endif
     }
 
+    func setCategoryResolver(_ resolver: @escaping (String) -> UUID?) {
+        categoryResolver = resolver
+    }
+
     func importFocuses() async throws -> [FocusItem] {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
-            FocusItem(id: UUID(),
+            let proposedID = row.tipoAsociado.flatMap { categoryResolver?($0) }
+            return FocusItem(id: UUID(),
                       name: row.descripcion ?? "Focus remoto",
                       expectedMinutes: row.duracionEstimanda,
                       actualMinutes: row.trabajado ?? 0,
                       taskIDs: [],
+                      proposedCategoryID: proposedID,
                       priority: row.prioridad ?? 0)
         }
     }
