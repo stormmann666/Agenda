@@ -39,6 +39,7 @@ final class SupabaseFocusService: FocusRemoteService {
     private let projectURL = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co")!
     private let apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdweWxjdXFvdmZ5amJocHR0Y3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDYwOTcsImV4cCI6MjA3OTkyMjA5N30.M0pslu02-ZJPU-ypyNSGhafo2KheVqEOl_NPhYOkD5g"
     private var categoryResolver: ((String) -> UUID?)?
+    private var categoryNameResolver: ((UUID) -> String?)?
 
     private init() {
         #if canImport(Supabase)
@@ -48,6 +49,10 @@ final class SupabaseFocusService: FocusRemoteService {
 
     func setCategoryResolver(_ resolver: @escaping (String) -> UUID?) {
         categoryResolver = resolver
+    }
+
+    func setCategoryNameResolver(_ resolver: @escaping (UUID) -> String?) {
+        categoryNameResolver = resolver
     }
 
     func importFocuses() async throws -> [FocusItem] {
@@ -149,13 +154,18 @@ final class SupabaseFocusService: FocusRemoteService {
     }
 
     private func focusPayload(from focus: FocusItem) -> [String: Any] {
-        return [
+        var payload: [String: Any] = [
             "id": numericID(for: focus),
             "Descripcion": focus.name,
             "Prioridad": focus.priority,
             "Duracion Estimada": focus.expectedMinutes ?? 0,
             "Trabajado": focus.actualMinutes ?? 0
         ]
+        if let categoryID = focus.proposedCategoryID,
+           let typeName = categoryNameResolver?(categoryID) {
+            payload["Tipo Asociado"] = typeName
+        }
+        return payload
     }
 
     private func performREST(method: String, body: [String: Any]? = nil, id: Int64? = nil) async throws {

@@ -817,6 +817,9 @@ final class ScheduleViewModel: ObservableObject {
                 $0.name.caseInsensitiveCompare(typeName) == .orderedSame
             }?.id
         }
+        supabaseService.setCategoryNameResolver { [weak self] identifier in
+            self?.category(for: identifier)?.name
+        }
     }
 
     private func nextAvailableStart(after date: Date) -> Int? {

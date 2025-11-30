@@ -1902,17 +1902,13 @@ struct FocusDiagnosticsView: View {
             }
             .navigationTitle("Ayuda / CSV")
             .onAppear {
-                remoteService.setCategoryResolver { name in
-                    viewModel.categoryID(named: name)
-                }
+                configureRemoteResolvers()
                 if exportedCSV.isEmpty {
                     exportedCSV = generateCSV(from: csvRows(for: .local))
                 }
             }
             .onChange(of: viewModel.categories) { _ in
-                remoteService.setCategoryResolver { name in
-                    viewModel.categoryID(named: name)
-                }
+                configureRemoteResolvers()
             }
             .onChange(of: dataSource) { _ in
                 exportedCSV = ""
@@ -1921,6 +1917,15 @@ struct FocusDiagnosticsView: View {
                     importedFocuses = []
                 }
             }
+        }
+    }
+
+    private func configureRemoteResolvers() {
+        remoteService.setCategoryResolver { name in
+            viewModel.categoryID(named: name)
+        }
+        remoteService.setCategoryNameResolver { categoryID in
+            viewModel.category(for: categoryID)?.name
         }
     }
 
