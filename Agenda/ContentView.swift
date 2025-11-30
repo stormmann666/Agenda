@@ -993,7 +993,7 @@ struct FocusManagerView: View {
                                     }
                                 }
                             if !estimationIndeterminate {
-                                TextField("Horas", text: $newFocusHours)
+                                TextField("Minutos", text: $newFocusHours)
                                     .keyboardType(.numberPad)
                                     .focused($hoursFieldFocused)
                             }
@@ -1051,7 +1051,7 @@ struct FocusManagerView: View {
                                     }
                                 }
                             if !editEstimationIndeterminate {
-                                TextField("Horas", text: $focusEditHours)
+                                TextField("Minutos", text: $focusEditHours)
                                     .keyboardType(.numberPad)
                             }
                         }
@@ -1087,7 +1087,9 @@ struct FocusManagerView: View {
                             Button("Guardar") {
                                 guard var updated = editingFocus else { return }
                                 updated.name = focusEditName
-                                updated.expectedMinutes = editEstimationIndeterminate ? nil : (Int(focusEditHours) ?? 0) * 60
+                                let estimateText = focusEditHours.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let estimatedMinutes = editEstimationIndeterminate ? nil : max(0, Int(estimateText) ?? 0)
+                                updated.expectedMinutes = estimatedMinutes
                                 updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
                                 updated.proposedCategoryID = focusEditProposedCategoryID
                                 updated.priority = focusEditPriority
@@ -1102,7 +1104,7 @@ struct FocusManagerView: View {
                 .onAppear {
                     focusEditName = focus.name
                     editEstimationIndeterminate = focus.expectedMinutes == nil
-                    focusEditHours = focus.expectedMinutes.map { String($0 / 60) } ?? ""
+                    focusEditHours = focus.expectedMinutes.map { String($0) } ?? ""
                     focusEditActualMinutes = String(focus.actualMinutes ?? 0)
                     focusEditProposedCategoryID = focus.proposedCategoryID
                 }
@@ -1139,13 +1141,15 @@ struct FocusManagerView: View {
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         if estimationIndeterminate { return true }
-        guard let hours = Int(newFocusHours), hours > 0 else { return false }
+        let minutesValue = newFocusHours.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let minutes = Int(minutesValue), minutes > 0 else { return false }
         return true
     }
 
     private func saveFocus() {
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let minutes = estimationIndeterminate ? nil : (Int(newFocusHours) ?? 0) * 60
+        let minutesInput = newFocusHours.trimmingCharacters(in: .whitespacesAndNewlines)
+        let minutes = estimationIndeterminate ? nil : max(0, Int(minutesInput) ?? 0)
         viewModel.addFocus(name: trimmed,
                            expectedMinutes: minutes,
                            proposedCategoryID: newFocusProposedCategoryID,
@@ -1370,7 +1374,8 @@ struct FocusManagerView: View {
         let trimmed = focusEditName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         if editEstimationIndeterminate { return true }
-        guard let hours = Int(focusEditHours), hours > 0 else { return false }
+        let estimateText = focusEditHours.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let minutes = Int(estimateText), minutes > 0 else { return false }
         return true
     }
 
