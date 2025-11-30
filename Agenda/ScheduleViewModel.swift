@@ -292,6 +292,12 @@ final class ScheduleViewModel: ObservableObject {
         categories.first { $0.id == id }
     }
 
+    func categoryID(named name: String) -> UUID? {
+        categories.first {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }?.id
+    }
+
     func isHourBoundaryBlock(index: Int) -> Bool {
         let blockMinutes = Self.blockMinutes
         guard blockMinutes > 0 else { return false }
