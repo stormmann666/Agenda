@@ -53,7 +53,12 @@ final class SupabaseFocusService: FocusRemoteService {
     func importFocuses() async throws -> [FocusItem] {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
+            
+            print(row.tipoAsociado)
             let proposedID = row.tipoAsociado.flatMap { categoryResolver?($0) }
+            print(proposedID)
+            
+            
             return FocusItem(id: UUID(),
                       name: row.descripcion ?? "Focus remoto",
                       expectedMinutes: row.duracionEstimanda,
