@@ -54,9 +54,9 @@ final class SupabaseFocusService: FocusRemoteService {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
             
-            print(row.tipoAsociado)
+            //print(row.tipoAsociado)
             let proposedID = row.tipoAsociado.flatMap { categoryResolver?($0) }
-            print(proposedID)
+            //print(proposedID)
             
             
             return FocusItem(id: UUID(),
@@ -146,7 +146,7 @@ final class SupabaseFocusService: FocusRemoteService {
     }
 
     private func performREST(method: String, body: [String: Any]? = nil, id: String? = nil) async throws {
-        var endpoint = projectURL.absoluteString + "/rest/v1/focuses"
+        var endpoint = projectURL.absoluteString + "/rest/v1/Focuses"
         if let id = id {
             endpoint += "?id=eq.\(id)"
         }

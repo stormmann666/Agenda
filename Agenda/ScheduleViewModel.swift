@@ -165,7 +165,11 @@ final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 5
     static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
     private static let appGroupID = "group.com.antoniomunoz.Agenda"
-    @Published var categories: [TaskCategory]
+    @Published var categories: [TaskCategory] {
+        didSet {
+            updateFocusServiceResolver()
+        }
+    }
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
@@ -188,7 +192,10 @@ final class ScheduleViewModel: ObservableObject {
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current,
-         focusService: FocusRemoteService? = nil) {
+         focusService: FocusRemoteService? = SupabaseFocusService.shared) {
+        //en focuservice cabiamos el DB o local
+        
+        
         var normalizedCalendar = calendar
         normalizedCalendar.timeZone = TimeZone.current
         self.calendar = normalizedCalendar
@@ -219,7 +226,8 @@ final class ScheduleViewModel: ObservableObject {
         migrateLegacyDataIfNeeded()
 
         categories = loadCategories()
-        focuses = loadCachedFocuses()
+        updateFocusServiceResolver()
+        //focuses = loadCachedFocuses()
         var loadedTasks = loadTasks()
         var loadedLogs = loadDayLogs()
 
@@ -798,6 +806,16 @@ final class ScheduleViewModel: ObservableObject {
                 print("Focus import failed: \(error)")
                 #endif
             }
+        }
+    }
+
+    private func updateFocusServiceResolver() {
+        guard let supabaseService = focusService as? SupabaseFocusService else { return }
+        supabaseService.setCategoryResolver { [weak self] typeName in
+            guard let categories = self?.categories else { return nil }
+            return categories.first {
+                $0.name.caseInsensitiveCompare(typeName) == .orderedSame
+            }?.id
         }
     }
 
