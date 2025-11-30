@@ -53,13 +53,9 @@ final class SupabaseFocusService: FocusRemoteService {
     func importFocuses() async throws -> [FocusItem] {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
-            
-            //print(row.tipoAsociado)
             let proposedID = row.tipoAsociado.flatMap { categoryResolver?($0) }
-            //print(proposedID)
-            
-            
-            return FocusItem(id: UUID(),
+            let identifier = uuid(from: row.id)
+            return FocusItem(id: identifier,
                       name: row.descripcion ?? "Focus remoto",
                       expectedMinutes: row.duracionEstimanda,
                       actualMinutes: row.trabajado ?? 0,
@@ -126,13 +122,30 @@ final class SupabaseFocusService: FocusRemoteService {
         #endif
     }
 
-    private func numericID(for focus: FocusItem) -> String {
+    private func numericID(for focus: FocusItem) -> Int64 {
         numericID(from: focus.id)
     }
 
-    private func numericID(from uuid: UUID) -> String {
+    private func numericID(from uuid: UUID) -> Int64 {
         let hex = uuid.uuidString.replacingOccurrences(of: "-", with: "")
-        return String(hex.prefix(16))
+        let prefix = hex.prefix(16)
+        let unsigned = UInt64(prefix, radix: 16) ?? 0
+        return Int64(bitPattern: unsigned)
+    }
+
+    private func uuid(from identifier: Int64) -> UUID {
+        let unsigned = UInt64(bitPattern: identifier)
+        let hex = String(format: "%016llx", unsigned)
+        let repeated = hex + hex
+        let parts = [
+            String(repeated.prefix(8)),
+            String(repeated.dropFirst(8).prefix(4)),
+            String(repeated.dropFirst(12).prefix(4)),
+            String(repeated.dropFirst(16).prefix(4)),
+            String(repeated.dropFirst(20).prefix(12))
+        ]
+        let uuidString = parts.joined(separator: "-")
+        return UUID(uuidString: uuidString) ?? UUID()
     }
 
     private func focusPayload(from focus: FocusItem) -> [String: Any] {
@@ -145,7 +158,7 @@ final class SupabaseFocusService: FocusRemoteService {
         ]
     }
 
-    private func performREST(method: String, body: [String: Any]? = nil, id: String? = nil) async throws {
+    private func performREST(method: String, body: [String: Any]? = nil, id: Int64? = nil) async throws {
         var endpoint = projectURL.absoluteString + "/rest/v1/Focuses"
         if let id = id {
             endpoint += "?id=eq.\(id)"
