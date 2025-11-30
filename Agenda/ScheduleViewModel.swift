@@ -514,6 +514,9 @@ final class ScheduleViewModel: ObservableObject {
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             focuses[index].isCompleted = true
         }
+        Task {
+            try? await focusService.deleteFocus(focus.id)
+        }
     }
 
     func clearFocus(for task: TaskItem) {
