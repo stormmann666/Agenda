@@ -33,6 +33,29 @@ struct ContentView: View {
     }
 }
 
+private struct FocusCSVRowData {
+    let id: String
+    let description: String
+    let type: String
+    let priority: Int
+    let estimated: Int
+    let worked: Int
+}
+
+private enum FocusDataSource: String, CaseIterable, Identifiable {
+    case local
+    case supabase
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .local: return "Local"
+        case .supabase: return "Supabase"
+        }
+    }
+}
+
 struct DayTimelineView: View {
     @ObservedObject var viewModel: ScheduleViewModel
 
@@ -1783,28 +1806,38 @@ struct FocusDiagnosticsView: View {
     @State private var importedFocuses: [SupabaseFocusRow] = []
     @State private var isImporting = false
     @State private var importError: String?
+    @State private var dataSource: FocusDataSource = .local
     private let remoteService = SupabaseFocusService.shared
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Origen de datos") {
+                    Picker("Fuente", selection: $dataSource) {
+                        ForEach(FocusDataSource.allCases) { source in
+                            Text(source.label).tag(source)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(dataSource == .local ? "Usando focuses locales del dispositivo." : "Usando focuses sincronizados desde Supabase.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Herramientas de exportación") {
                     Button {
-                        let csv = generateCSV()
-                        exportedCSV = csv
-                        lastExportDate = Date()
-                        UIPasteboard.general.string = csv
+                        exportCurrentSource()
                     } label: {
                         Label("Export to CSV", systemImage: "arrow.down.doc")
                             .font(.headline)
                     }
+                    .disabled(dataSource == .supabase && importedFocuses.isEmpty)
                     if let timestamp = lastExportDate {
                         Text("Generado: \(timestamp.formatted(date: .omitted, time: .standard))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     ScrollView {
-                        Text(exportedCSV.isEmpty ? "Pulsa \"Export to CSV\" para generar el archivo." : exportedCSV)
+                        Text(exportedCSV.isEmpty ? exportHint : exportedCSV)
                             .font(.system(.body, design: .monospaced))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
@@ -1823,70 +1856,111 @@ struct FocusDiagnosticsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("Importación Supabase") {
-                    Button {
-                        fetchFocusesFromSupabase()
-                    } label: {
-                        Label("Import from Supabase", systemImage: "arrow.up.doc")
-                    }
-                    .disabled(isImporting)
-                    if isImporting {
-                        ProgressView("Importando…")
-                    }
-                    if let error = importError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    if importedFocuses.isEmpty {
-                        Text("Todavía no se han recibido datos.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ScrollView(.horizontal) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                headerRow
-                                Divider()
-                                ForEach(importedFocuses) { row in
-                                    HStack {
-                                        Text(row.descripcion ?? "-")
-                                        Text(row.tipoAsociado ?? "-")
-                                        Text("\(row.prioridad ?? 0)")
-                                        Text("\(row.duracionEstimanda ?? 0)")
-                                        Text("\(row.trabajado ?? 0)")
-                                    }
-                                    .font(.caption)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if dataSource == .supabase {
+                    Section("Importación Supabase") {
+                        Button {
+                            fetchFocusesFromSupabase()
+                        } label: {
+                            Label("Import from Supabase", systemImage: "arrow.up.doc")
                         }
-                        .frame(minHeight: 180)
+                        .disabled(isImporting)
+                        if isImporting {
+                            ProgressView("Importando…")
+                        }
+                        if let error = importError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        if importedFocuses.isEmpty {
+                            Text("Todavía no se han recibido datos.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ScrollView(.horizontal) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    headerRow
+                                    Divider()
+                                    ForEach(importedFocuses) { row in
+                                        HStack {
+                                            Text(row.descripcion ?? "-")
+                                            Text(row.tipoAsociado ?? "-")
+                                            Text("\(row.prioridad ?? 0)")
+                                            Text("\(row.duracionEstimanda ?? 0)")
+                                            Text("\(row.trabajado ?? 0)")
+                                        }
+                                        .font(.caption)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(minHeight: 180)
+                        }
                     }
                 }
             }
             .navigationTitle("Ayuda / CSV")
             .onAppear {
+                remoteService.setCategoryResolver { name in
+                    viewModel.categoryID(named: name)
+                }
                 if exportedCSV.isEmpty {
-                    exportedCSV = generateCSV()
+                    exportedCSV = generateCSV(from: csvRows(for: .local))
+                }
+            }
+            .onChange(of: viewModel.categories) { _ in
+                remoteService.setCategoryResolver { name in
+                    viewModel.categoryID(named: name)
+                }
+            }
+            .onChange(of: dataSource) { _ in
+                exportedCSV = ""
+                importError = nil
+                if dataSource == .local {
+                    importedFocuses = []
                 }
             }
         }
     }
 
-    private func generateCSV() -> String {
+    private func csvRows(for source: FocusDataSource) -> [FocusCSVRowData] {
+        switch source {
+        case .local:
+            return viewModel.focuses.map { focus in
+                let typeName = focus.proposedCategoryID.flatMap { viewModel.category(for: $0)?.name } ?? "Indeterminado"
+                return FocusCSVRowData(id: numericID(for: focus),
+                                       description: focus.name,
+                                       type: typeName,
+                                       priority: focus.priority,
+                                       estimated: focus.expectedMinutes ?? 0,
+                                       worked: focus.actualMinutes ?? 0)
+            }
+        case .supabase:
+            return importedFocuses.map { row in
+                FocusCSVRowData(id: String(row.id),
+                                description: row.descripcion ?? "Focus remoto",
+                                type: row.tipoAsociado ?? "Indeterminado",
+                                priority: row.prioridad ?? 0,
+                                estimated: row.duracionEstimanda ?? 0,
+                                worked: row.trabajado ?? 0)
+            }
+        }
+    }
+
+    private func generateCSV(from rows: [FocusCSVRowData]) -> String {
         var lines: [String] = []
         lines.append("id,Descripcion,Tipo Asociado,Prioridad,Duracion Estimanda,Trabajado")
-        for focus in viewModel.focuses {
-            let idField = csvField(numericID(for: focus))
-            let descriptionField = csvField(focus.name)
-            let typeName = focus.proposedCategoryID.flatMap { viewModel.category(for: $0)?.name } ?? "Indeterminado"
-            let typeField = csvField(typeName)
-            let priorityField = "\(focus.priority)"
-            let estimatedField = "\(focus.expectedMinutes ?? 0)"
-            let actualField = "\(focus.actualMinutes ?? 0)"
-            let row = [idField, descriptionField, typeField, priorityField, estimatedField, actualField].joined(separator: ",")
-            lines.append(row)
+        for row in rows {
+            let line = [
+                csvField(row.id),
+                csvField(row.description),
+                csvField(row.type),
+                "\(row.priority)",
+                "\(row.estimated)",
+                "\(row.worked)"
+            ].joined(separator: ",")
+            lines.append(line)
         }
         return lines.joined(separator: "\n")
     }
@@ -1906,6 +1980,27 @@ struct FocusDiagnosticsView: View {
         let value = UInt64(prefix, radix: 16) ?? 0
         let signed = Int64(value % UInt64(Int64.max))
         return String(signed)
+    }
+
+    private func exportCurrentSource() {
+        let rows = csvRows(for: dataSource)
+        guard !rows.isEmpty else {
+            exportedCSV = ""
+            return
+        }
+        let csv = generateCSV(from: rows)
+        exportedCSV = csv
+        lastExportDate = Date()
+        UIPasteboard.general.string = csv
+    }
+
+    private var exportHint: String {
+        switch dataSource {
+        case .local:
+            return "Pulsa \"Export to CSV\" para exportar los focuses locales."
+        case .supabase:
+            return importedFocuses.isEmpty ? "Importa los focuses de Supabase antes de exportar." : "Pulsa \"Export to CSV\" para exportar los focuses de Supabase."
+        }
     }
 
     private func fetchFocusesFromSupabase() {
