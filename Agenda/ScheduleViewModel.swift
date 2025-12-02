@@ -19,6 +19,18 @@ protocol FocusRemoteService {
     func createFocus(_ focus: FocusItem) async throws
     func updateFocus(_ focus: FocusItem) async throws
     func deleteFocus(_ focusID: UUID) async throws
+    func updateCategoryMappings(_ categories: [TaskCategory])
+}
+
+extension FocusRemoteService {
+    func updateCategoryMappings(_ categories: [TaskCategory]) { }
+}
+
+protocol TaskCategoryRemoteService {
+    func importCategories() async throws -> [TaskCategory]
+    func createCategory(_ category: TaskCategory) async throws
+    func updateCategory(_ category: TaskCategory) async throws
+    func deleteCategory(_ categoryID: UUID) async throws
 }
 
 struct TaskCategory: Identifiable, Codable, Hashable {
