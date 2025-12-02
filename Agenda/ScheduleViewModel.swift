@@ -506,6 +506,7 @@ final class ScheduleViewModel: ObservableObject {
     func scheduleFocusAtCurrentTime(_ focus: FocusItem, referenceDate: Date = Date()) -> TaskItem? {
         guard let categoryID = focus.proposedCategoryID,
               let category = category(for: categoryID) else { return nil }
+        print("[ScheduleViewModel] Scheduling focus using category id: \(categoryID)")
         guard let startIndex = nextAvailableStart(after: referenceDate) else { return nil }
         guard let newTask = addTask(at: startIndex, category: category) else { return nil }
         assignFocus(focus, to: newTask)
