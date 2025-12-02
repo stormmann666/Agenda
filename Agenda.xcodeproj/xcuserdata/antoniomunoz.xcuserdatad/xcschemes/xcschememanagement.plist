@@ -9,6 +9,11 @@
 			<key>orderHint</key>
 			<integer>1</integer>
 		</dict>
+		<key>AgendaTests.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
 		<key>AgendaWidgetExtension.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>isShown</key>
@@ -20,6 +25,11 @@
 	<key>SuppressBuildableAutocreation</key>
 	<dict>
 		<key>C8A9B7662ED182980082358E</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>C8A9B7C92ED32C7A0082358E</key>
 		<dict>
 			<key>primary</key>
 			<true/>
