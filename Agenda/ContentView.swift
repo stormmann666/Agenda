@@ -1862,6 +1862,15 @@ struct FocusDiagnosticsView: View {
                     )
                     .textSelection(.enabled)
                     .accessibilityLabel("Contenido CSV exportado")
+
+                    if dataSource == .local {
+                        Button {
+                            exportCategories()
+                        } label: {
+                            Label("Export categories CSV", systemImage: "square.and.arrow.down.on.square")
+                                .font(.subheadline)
+                        }
+                    }
                 }
                 Section("Formato esperado") {
                     Text("id, Descripcion, Tipo Asociado, Prioridad, Duracion Estimada, Trabajado")
@@ -1909,18 +1918,20 @@ struct FocusDiagnosticsView: View {
                             }
                             .frame(minHeight: 180)
                         }
+
+                        Button {
+                            fetchCategoriesFromSupabase()
+                        } label: {
+                            Label("Import categories", systemImage: "folder.badge.plus")
+                        }
                     }
                 }
             }
             .navigationTitle("Ayuda / CSV")
             .onAppear {
-                configureRemoteResolvers()
                 if exportedCSV.isEmpty {
                     exportedCSV = generateCSV(from: csvRows(for: .local))
                 }
-            }
-            .onChange(of: viewModel.categories) { _ in
-                configureRemoteResolvers()
             }
             .onChange(of: dataSource) { _ in
                 exportedCSV = ""
@@ -1929,15 +1940,6 @@ struct FocusDiagnosticsView: View {
                     importedFocuses = []
                 }
             }
-        }
-    }
-
-    private func configureRemoteResolvers() {
-        remoteService.setCategoryResolver { name in
-            viewModel.categoryID(named: name)
-        }
-        remoteService.setCategoryNameResolver { categoryID in
-            viewModel.category(for: categoryID)?.name
         }
     }
 
@@ -2011,6 +2013,17 @@ struct FocusDiagnosticsView: View {
         UIPasteboard.general.string = csv
     }
 
+    private func exportCategories() {
+        let header = "id,name,colorHex"
+        let lines = viewModel.categories.map { category in
+            "\(category.id.uuidString),\(category.name),\(category.colorHex)"
+        }
+        let csv = ([header] + lines).joined(separator: "\n")
+        exportedCSV = csv
+        lastExportDate = Date()
+        UIPasteboard.general.string = csv
+    }
+
     private var exportHint: String {
         switch dataSource {
         case .local:
@@ -2037,6 +2050,21 @@ struct FocusDiagnosticsView: View {
                 await MainActor.run {
                     importError = error.localizedDescription
                     isImporting = false
+                }
+            }
+        }
+    }
+
+    private func fetchCategoriesFromSupabase() {
+        Task {
+            do {
+                let rows = try await SupabaseTaskCategoryService.shared.importCategories()
+                await MainActor.run {
+                    viewModel.categories = rows
+                }
+            } catch {
+                await MainActor.run {
+                    importError = error.localizedDescription
                 }
             }
         }
