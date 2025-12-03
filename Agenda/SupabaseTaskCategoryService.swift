@@ -12,7 +12,7 @@ import Supabase
 #endif
 
 struct SupabaseTaskCategoryRow: Identifiable, Codable {
-    let id: UUID?
+    let id: String?
     let name: String?
     let colorHex: String?
 
@@ -43,7 +43,8 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
     func importCategories() async throws -> [TaskCategory] {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
-            TaskCategory(id: row.id ?? UUID(),
+            let identifier = UUID(uuidString: row.id ?? "") ?? UUID()
+            return TaskCategory(id: identifier,
                          name: row.name ?? "Tipo remoto",
                          colorHex: row.colorHex ?? "#ffffff")
         }

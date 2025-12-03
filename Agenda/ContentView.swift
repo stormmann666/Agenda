@@ -1930,6 +1930,11 @@ struct FocusDiagnosticsView: View {
                         } label: {
                             Label("Import categories", systemImage: "folder.badge.plus")
                         }
+                        if let error = importError {
+                            Text("Supabase: \(error)")
+                                .font(.caption2)
+                                .foregroundColor(.red)
+                        }
                     }
                 }
             }
