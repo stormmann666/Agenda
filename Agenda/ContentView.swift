@@ -338,13 +338,13 @@ struct DayTimelineView: View {
                 HStack(spacing: 8) {
                     Text(liveIndicatorLabel)
                         .font(.caption2)
-                        .foregroundColor(liveLineColor)
+                        .foregroundColor(liveLineColor(for: block))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color(.systemBackground).opacity(0.85))
                         .clipShape(Capsule())
                     Rectangle()
-                        .fill(liveLineColor)
+                        .fill(liveLineColor(for: block))
                         .frame(height: 2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -457,8 +457,11 @@ struct DayTimelineView: View {
         return CGFloat(fraction) * blockHeight * CGFloat(block.span)
     }
 
-    private var liveLineColor: Color {
-        Color(red: 0.15, green: 0.7, blue: 0.45)
+    private func liveLineColor(for block: TimelineBlock) -> Color {
+        if block.task != nil {
+            return .red
+        }
+        return Color(red: 0.15, green: 0.7, blue: 0.45)
     }
 
     private var liveIndicatorLabel: String {
