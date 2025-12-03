@@ -1816,6 +1816,7 @@ struct FocusDiagnosticsView: View {
     @State private var exportedCSV: String = ""
     @State private var lastExportDate: Date?
     @State private var importedFocuses: [SupabaseFocusRow] = []
+    @State private var importedCategoriesText: String = ""
     @State private var isImporting = false
     @State private var importError: String?
     @State private var importInfo: String?
@@ -1929,6 +1930,21 @@ struct FocusDiagnosticsView: View {
                             fetchCategoriesFromSupabase()
                         } label: {
                             Label("Import categories", systemImage: "folder.badge.plus")
+                        }
+                        if !importedCategoriesText.isEmpty {
+                            ScrollView {
+                                Text(importedCategoriesText)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                            }
+                            .frame(minHeight: 120)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(UIColor.secondarySystemBackground)))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.4))
+                            )
+                            .textSelection(.enabled)
                         }
                         if let error = importError {
                             Text("Supabase: \(error)")
@@ -2080,6 +2096,9 @@ struct FocusDiagnosticsView: View {
                 print("[SupabaseCategories] Recibidas \(rows.count) categorías")
                 await MainActor.run {
                     viewModel.categories = rows
+                    importedCategoriesText = rows
+                        .map { "\($0.id.uuidString)  |  \($0.name)  |  \($0.colorHex)" }
+                        .joined(separator: "\n")
                     isImporting = false
                     importInfo = "Importadas \(rows.count) categorías."
                 }
