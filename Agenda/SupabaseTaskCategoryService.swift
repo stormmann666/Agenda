@@ -32,7 +32,7 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
 
     private let projectURL = URL(string: "https://gpylcuqovfyjbhpttcsc.supabase.co")!
     private let apiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdweWxjdXFvdmZ5amJocHR0Y3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDYwOTcsImV4cCI6MjA3OTkyMjA5N30.M0pslu02-ZJPU-ypyNSGhafo2KheVqEOl_NPhYOkD5g"
-    private let tableName = "Categories"
+    private let tableName = "Categorias"
 
     private init() {
         #if canImport(Supabase)
@@ -52,7 +52,7 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
     func createCategory(_ category: TaskCategory) async throws {
         let payload = categoryPayload(from: category)
         #if canImport(Supabase)
-        try await client.database.from(tableName.lowercased()).insert(payload).execute()
+        try await client.database.from(tableName).insert(payload).execute()
         #else
         try await performREST(method: "POST", body: payload)
         #endif
@@ -61,7 +61,7 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
     func updateCategory(_ category: TaskCategory) async throws {
         let payload = categoryPayload(from: category)
         #if canImport(Supabase)
-        try await client.database.from(tableName.lowercased()).update(payload).eq("id", value: category.id.uuidString).execute()
+        try await client.database.from(tableName).update(payload).eq("id", value: category.id.uuidString).execute()
         #else
         try await performREST(method: "PATCH", body: payload, id: category.id)
         #endif
@@ -69,7 +69,7 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
 
     func deleteCategory(_ categoryID: UUID) async throws {
         #if canImport(Supabase)
-        try await client.database.from(tableName.lowercased()).delete().eq("id", value: categoryID.uuidString).execute()
+        try await client.database.from(tableName).delete().eq("id", value: categoryID.uuidString).execute()
         #else
         try await performREST(method: "DELETE", id: categoryID)
         #endif
@@ -77,7 +77,7 @@ final class SupabaseTaskCategoryService: TaskCategoryRemoteService {
 
     private func fetchRemoteRows() async throws -> [SupabaseTaskCategoryRow] {
         #if canImport(Supabase)
-        let rows: [SupabaseTaskCategoryRow] = try await client.database.from(tableName.lowercased()).select().execute().value
+        let rows: [SupabaseTaskCategoryRow] = try await client.database.from(tableName).select().execute().value
         return rows
         #else
         var components = URLComponents(url: projectURL, resolvingAgainstBaseURL: false)

@@ -1818,6 +1818,7 @@ struct FocusDiagnosticsView: View {
     @State private var importedFocuses: [SupabaseFocusRow] = []
     @State private var isImporting = false
     @State private var importError: String?
+    @State private var importInfo: String?
     @State private var dataSource: FocusDataSource = .local
     private let remoteService = SupabaseFocusService.shared
 
@@ -1892,6 +1893,11 @@ struct FocusDiagnosticsView: View {
                             Text(error)
                                 .font(.caption)
                                 .foregroundColor(.red)
+                        }
+                        if let info = importInfo {
+                            Text(info)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         if importedFocuses.isEmpty {
                             Text("Todavía no se han recibido datos.")
@@ -2036,6 +2042,7 @@ struct FocusDiagnosticsView: View {
     private func fetchFocusesFromSupabase() {
         isImporting = true
         importError = nil
+        importInfo = nil
         print("[SupabaseImport] Iniciando importación...")
         Task {
             do {
@@ -2044,11 +2051,13 @@ struct FocusDiagnosticsView: View {
                 await MainActor.run {
                     importedFocuses = rows
                     isImporting = false
+                    importInfo = "Importados \(rows.count) focuses."
                 }
             } catch {
                 print("[SupabaseImport] Error: \(error)")
                 await MainActor.run {
                     importError = error.localizedDescription
+                    importInfo = nil
                     isImporting = false
                 }
             }
@@ -2056,15 +2065,22 @@ struct FocusDiagnosticsView: View {
     }
 
     private func fetchCategoriesFromSupabase() {
+        isImporting = true
+        importError = nil
+        importInfo = nil
         Task {
             do {
                 let rows = try await SupabaseTaskCategoryService.shared.importCategories()
                 await MainActor.run {
                     viewModel.categories = rows
+                    isImporting = false
+                    importInfo = "Importadas \(rows.count) categorías."
                 }
             } catch {
                 await MainActor.run {
                     importError = error.localizedDescription
+                    importInfo = nil
+                    isImporting = false
                 }
             }
         }

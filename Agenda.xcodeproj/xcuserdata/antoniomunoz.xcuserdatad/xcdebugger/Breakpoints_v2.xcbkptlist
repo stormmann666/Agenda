@@ -52,5 +52,323 @@
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "12425084-493C-4E2B-92A4-292D84CBFE9D"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "45"
+            endingLineNumber = "45"
+            landmarkName = "importCategories()"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "12425084-493C-4E2B-92A4-292D84CBFE9D - 1919af4d4d902505"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(2) suspend resume partial function for Agenda.SupabaseTaskCategoryService.importCategories() async throws -&gt; Swift.Array&lt;Agenda.TaskCategory&gt;"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "45"
+                  endingLineNumber = "45">
+               </Location>
+               <Location
+                  uuid = "12425084-493C-4E2B-92A4-292D84CBFE9D - 29e33fd1b2f1f2ca"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #1 (Agenda.SupabaseTaskCategoryRow) -&gt; Agenda.TaskCategory in Agenda.SupabaseTaskCategoryService.importCategories() async throws -&gt; Swift.Array&lt;Agenda.TaskCategory&gt;"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "46"
+                  endingLineNumber = "46">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "25E077AE-64AB-443F-9595-B7F147781747"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "121"
+            endingLineNumber = "121"
+            landmarkName = "performREST(method:body:id:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - 1e6c0b5fd26792fa"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - 7058f708183cefb4"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(1) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - 7058f708183cefb4"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(1) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - fec853ebc7621db3"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(2) await resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - 5bbc912db2162bba"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+               <Location
+                  uuid = "25E077AE-64AB-443F-9595-B7F147781747 - 304e6c53e1e285b9"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(4) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "121"
+                  endingLineNumber = "121">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "79C98B05-DBCA-4203-A130-E1F723BFE424"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "130"
+            endingLineNumber = "130"
+            landmarkName = "performREST(method:body:id:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "79C98B05-DBCA-4203-A130-E1F723BFE424 - 5bbc912db2162d63"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "130"
+                  endingLineNumber = "130">
+               </Location>
+               <Location
+                  uuid = "79C98B05-DBCA-4203-A130-E1F723BFE424 - 5bbc912db2162d63"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for Agenda.SupabaseTaskCategoryService.performREST(method: Swift.String, body: Swift.Optional&lt;Swift.Dictionary&lt;Swift.String, Any&gt;&gt;, id: Swift.Optional&lt;Foundation.UUID&gt;) async throws -&gt; ()"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "130"
+                  endingLineNumber = "130">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "0D82D833-1238-4FA1-A5D8-D8114E35E666"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "132"
+            endingLineNumber = "132"
+            landmarkName = "performREST(method:body:id:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "6CB8EE69-F7EE-44CE-9018-A60AB87990BA"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "115"
+            endingLineNumber = "115"
+            landmarkName = "performREST(method:body:id:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "8279463F-F261-451E-9A22-7F782E6249F0"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "101"
+            endingLineNumber = "101"
+            landmarkName = "fetchRemoteRows()"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "AFACC394-3776-4149-83CF-02349C74EA88"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "98"
+            endingLineNumber = "98"
+            landmarkName = "fetchRemoteRows()"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "D648D280-91A4-4755-9BDB-1AC499E0140B"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Agenda/SupabaseTaskCategoryService.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "102"
+            endingLineNumber = "102"
+            landmarkName = "fetchRemoteRows()"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "D648D280-91A4-4755-9BDB-1AC499E0140B - 49e13d39a757fdaa"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(1) suspend resume partial function for Agenda.SupabaseTaskCategoryService.fetchRemoteRows() async throws -&gt; Swift.Array&lt;Agenda.SupabaseTaskCategoryRow&gt;"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "103"
+                  endingLineNumber = "103">
+               </Location>
+               <Location
+                  uuid = "D648D280-91A4-4755-9BDB-1AC499E0140B - 858e1e18fb3139ac"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(3) suspend resume partial function for Agenda.SupabaseTaskCategoryService.fetchRemoteRows() async throws -&gt; Swift.Array&lt;Agenda.SupabaseTaskCategoryRow&gt;"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "103"
+                  endingLineNumber = "103">
+               </Location>
+               <Location
+                  uuid = "D648D280-91A4-4755-9BDB-1AC499E0140B - bf7c8168a91d97af"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "(4) suspend resume partial function for Agenda.SupabaseTaskCategoryService.fetchRemoteRows() async throws -&gt; Swift.Array&lt;Agenda.SupabaseTaskCategoryRow&gt;"
+                  moduleName = "Agenda.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoniomunoz/Documents/developer/WorkingIt/Agenda/Agenda/SupabaseTaskCategoryService.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "103"
+                  endingLineNumber = "103">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
    </Breakpoints>
 </Bucket>
