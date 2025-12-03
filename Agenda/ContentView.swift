@@ -2075,7 +2075,9 @@ struct FocusDiagnosticsView: View {
         importInfo = nil
         Task {
             do {
+                print("[SupabaseCategories] Iniciando importación...")
                 let rows = try await SupabaseTaskCategoryService.shared.importCategories()
+                print("[SupabaseCategories] Recibidas \(rows.count) categorías")
                 await MainActor.run {
                     viewModel.categories = rows
                     isImporting = false
