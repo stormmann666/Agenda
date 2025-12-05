@@ -175,6 +175,7 @@ struct TimelineBlock: Identifiable {
 
 final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 5
+    private let categoryService: TaskCategoryRemoteService
     static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
     private static let appGroupID = "group.com.antoniomunoz.Agenda"
     @Published var categories: [TaskCategory] {
@@ -204,7 +205,8 @@ final class ScheduleViewModel: ObservableObject {
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current,
-         focusService: FocusRemoteService? = SupabaseFocusService.shared) {
+         focusService: FocusRemoteService? = SupabaseFocusService.shared,
+         categoryService: TaskCategoryRemoteService? = SupabaseTaskCategoryService.shared) {
         //en focuservice cabiamos el DB o local
         
         
@@ -214,6 +216,7 @@ final class ScheduleViewModel: ObservableObject {
         self.defaults = defaults
         let resolvedFocusService = focusService ?? UserDefaultsFocusStorage(defaults: defaults, key: focusesKey)
         self.focusService = resolvedFocusService
+        self.categoryService = categoryService ?? SupabaseTaskCategoryService.shared
         self.focusCache = resolvedFocusService as? FocusStorageProvider
         categories = []
         tasks = []
@@ -239,6 +242,19 @@ final class ScheduleViewModel: ObservableObject {
 
         categories = loadCategories()
         updateFocusServiceResolver()
+        Task { [weak self] in
+            do {
+                guard let self else { return }
+                let remoteCategories = try await self.categoryService.importCategories()
+                await MainActor.run {
+                    self.categories = remoteCategories
+                }
+            } catch {
+                #if DEBUG
+                print("[Categories] Remote fetch failed: \(error)")
+                #endif
+            }
+        }
         //focuses = loadCachedFocuses()
         var loadedTasks = loadTasks()
         var loadedLogs = loadDayLogs()
