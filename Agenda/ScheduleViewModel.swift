@@ -616,6 +616,7 @@ final class ScheduleViewModel: ObservableObject {
         mutateTasks { tasks in
             tasks.removeAll { $0.categoryID == category.id }
         }
+        syncCategoryDeletion(category)
     }
 
     func clearAllTasks() {
@@ -787,6 +788,18 @@ final class ScheduleViewModel: ObservableObject {
             } catch {
                 #if DEBUG
                 print("[Categories] Failed to create \(category.id): \(error)")
+                #endif
+            }
+        }
+    }
+
+    private func syncCategoryDeletion(_ category: TaskCategory) {
+        Task {
+            do {
+                try await categoryService.deleteCategory(category.id)
+            } catch {
+                #if DEBUG
+                print("[Categories] Failed to delete \(category.id): \(error)")
                 #endif
             }
         }
