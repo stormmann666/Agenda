@@ -597,6 +597,7 @@ final class ScheduleViewModel: ObservableObject {
         mutateCategories { categories in
             categories.append(newCategory)
         }
+        syncCategoryCreation(newCategory)
     }
 
     func addCategory(name: String, color: Color) {
@@ -605,6 +606,7 @@ final class ScheduleViewModel: ObservableObject {
         mutateCategories { categories in
             categories.append(newCategory)
         }
+        syncCategoryCreation(newCategory)
     }
 
     func deleteCategory(_ category: TaskCategory) {
@@ -776,6 +778,18 @@ final class ScheduleViewModel: ObservableObject {
     private func saveCategories() {
         guard let data = try? JSONEncoder().encode(categories) else { return }
         defaults.set(data, forKey: categoriesKey)
+    }
+
+    private func syncCategoryCreation(_ category: TaskCategory) {
+        Task {
+            do {
+                try await categoryService.createCategory(category)
+            } catch {
+                #if DEBUG
+                print("[Categories] Failed to create \(category.id): \(error)")
+                #endif
+            }
+        }
     }
 
     private func loadCachedFocuses() -> [FocusItem] {
