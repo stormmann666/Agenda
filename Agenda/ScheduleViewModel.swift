@@ -589,6 +589,7 @@ final class ScheduleViewModel: ObservableObject {
         mutateCategories { categories in
             categories[index] = category
         }
+        syncCategoryUpdate(category)
     }
 
     func addCategory() {
@@ -785,6 +786,9 @@ final class ScheduleViewModel: ObservableObject {
         Task {
             do {
                 try await categoryService.createCategory(category)
+#if DEBUG
+                print("[Categories] Created remote category \(category.id) (\(category.name))")
+#endif
             } catch {
                 #if DEBUG
                 print("[Categories] Failed to create \(category.id): \(error)")
@@ -797,10 +801,28 @@ final class ScheduleViewModel: ObservableObject {
         Task {
             do {
                 try await categoryService.deleteCategory(category.id)
+#if DEBUG
+                print("[Categories] Deleted remote category \(category.id) (\(category.name))")
+#endif
             } catch {
                 #if DEBUG
                 print("[Categories] Failed to delete \(category.id): \(error)")
                 #endif
+            }
+        }
+    }
+
+    private func syncCategoryUpdate(_ category: TaskCategory) {
+        Task {
+            do {
+                try await categoryService.updateCategory(category)
+#if DEBUG
+                print("[Categories] Updated remote category \(category.id) (\(category.name))")
+#endif
+            } catch {
+#if DEBUG
+                print("[Categories] Failed to update \(category.id): \(error)")
+#endif
             }
         }
     }
