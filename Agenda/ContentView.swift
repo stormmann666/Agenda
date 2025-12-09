@@ -29,6 +29,10 @@ struct ContentView: View {
                 .tabItem {
                     Label("Ayuda", systemImage: "questionmark.circle")
                 }
+            OneThingView()
+                .tabItem {
+                    Label("OneThing", systemImage: "lightbulb.max")
+                }
         }
     }
 }
