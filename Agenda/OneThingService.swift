@@ -57,8 +57,8 @@ protocol OneThingRemoteService {
     func deleteEntry(_ entryID: UUID) async throws
 }
 
-private struct SupabaseOneThingRow: Codable, Identifiable {
-    let id: String?
+private struct SupabaseOneThingRow: Codable {
+    let id: Int64?
     let date: String?
     let series: String?
     let url: String?
@@ -86,7 +86,7 @@ final class SupabaseOneThingService: OneThingRemoteService {
     func fetchEntries() async throws -> [OneThingEntry] {
         let rows = try await fetchRemoteRows()
         return rows.map { row in
-            let identifier = UUID(uuidString: row.id ?? "") ?? UUID()
+            let identifier = uuid(from: row.id ?? 0)
             let dateValue = OneThingEntry.parse(dateString: row.date ?? "")
             return OneThingEntry(id: identifier,
                                  date: dateValue,
@@ -108,21 +108,23 @@ final class SupabaseOneThingService: OneThingRemoteService {
 
     func updateEntry(_ entry: OneThingEntry) async throws {
         let payload = payload(from: entry)
+        let identifier = numericID(for: entry)
         #if canImport(Supabase)
         try await client.database.from(tableName)
             .update(payload)
-            .eq("id", value: entry.id.uuidString)
+            .eq("id", value: identifier)
             .execute()
         #else
-        try await performREST(method: "PATCH", body: payload, id: entry.id)
+        try await performREST(method: "PATCH", body: payload, id: identifier)
         #endif
     }
 
     func deleteEntry(_ entryID: UUID) async throws {
+        let identifier = numericID(from: entryID)
         #if canImport(Supabase)
-        try await client.database.from(tableName).delete().eq("id", value: entryID.uuidString).execute()
+        try await client.database.from(tableName).delete().eq("id", value: identifier).execute()
         #else
-        try await performREST(method: "DELETE", id: entryID)
+        try await performREST(method: "DELETE", id: identifier)
         #endif
     }
 
@@ -157,7 +159,7 @@ final class SupabaseOneThingService: OneThingRemoteService {
 
     private func payload(from entry: OneThingEntry) -> [String: Any] {
         [
-            "id": entry.id.uuidString,
+            "id": numericID(for: entry),
             "date": isoDateString(from: entry.date),
             "series": entry.series,
             "url": entry.url,
@@ -173,10 +175,36 @@ final class SupabaseOneThingService: OneThingRemoteService {
         return formatter.string(from: date)
     }
 
-    private func performREST(method: String, body: [String: Any]? = nil, id: UUID? = nil) async throws {
+    private func numericID(for entry: OneThingEntry) -> Int64 {
+        numericID(from: entry.id)
+    }
+
+    private func numericID(from uuid: UUID) -> Int64 {
+        let hex = uuid.uuidString.replacingOccurrences(of: "-", with: "")
+        let prefix = hex.prefix(16)
+        let unsigned = UInt64(prefix, radix: 16) ?? 0
+        return Int64(bitPattern: unsigned)
+    }
+
+    private func uuid(from identifier: Int64) -> UUID {
+        let unsigned = UInt64(bitPattern: identifier)
+        let hex = String(format: "%016llx", unsigned)
+        let repeated = hex + hex
+        let parts = [
+            String(repeated.prefix(8)),
+            String(repeated.dropFirst(8).prefix(4)),
+            String(repeated.dropFirst(12).prefix(4)),
+            String(repeated.dropFirst(16).prefix(4)),
+            String(repeated.dropFirst(20).prefix(12))
+        ]
+        let uuidString = parts.joined(separator: "-")
+        return UUID(uuidString: uuidString) ?? UUID()
+    }
+
+    private func performREST(method: String, body: [String: Any]? = nil, id: Int64? = nil) async throws {
         var endpoint = projectURL.absoluteString + "/rest/v1/\(tableName)"
         if let id {
-            endpoint += "?id=eq.\(id.uuidString)"
+            endpoint += "?id=eq.\(id)"
         }
         guard let url = URL(string: endpoint) else {
             throw NSError(domain: "SupabaseOneThingService", code: -1, userInfo: [NSLocalizedDescriptionKey: "URL inválida"])
