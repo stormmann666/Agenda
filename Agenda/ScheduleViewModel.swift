@@ -301,17 +301,25 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func timelineBlocks() -> [TimelineBlock] {
+        timelineBlocks(for: dayStart)
+    }
+
+    func timelineBlocks(for date: Date) -> [TimelineBlock] {
+        let blocksCount = totalBlocks(for: date)
+        guard blocksCount > 0 else { return [] }
+        let dayTasks = timelineTasks(for: date)
+        let baseStart = timelineDayStart(for: date)
         var blocks: [TimelineBlock] = []
         var pointer = 0
-        let sortedTasks = tasks.sorted { $0.startIndex < $1.startIndex }
+        let sortedTasks = dayTasks.sorted { $0.startIndex < $1.startIndex }
 
-        while pointer < totalBlocks {
+        while pointer < blocksCount {
             if let task = sortedTasks.first(where: { $0.startIndex == pointer }) {
-                let startDate = date(for: pointer)
+                let startDate = baseStart.addingTimeInterval(Double(pointer * Self.blockMinutes) * 60)
                 blocks.append(TimelineBlock(index: pointer, span: task.duration, task: task, startDate: startDate))
                 pointer += task.duration
             } else {
-                let startDate = date(for: pointer)
+                let startDate = baseStart.addingTimeInterval(Double(pointer * Self.blockMinutes) * 60)
                 blocks.append(TimelineBlock(index: pointer, span: 1, task: nil, startDate: startDate))
                 pointer += 1
             }
@@ -321,13 +329,22 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func label(for index: Int) -> String {
+        label(for: index, on: dayStart)
+    }
+
+    func label(for index: Int, on date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date(for: index))
+        return formatter.string(from: self.date(for: index, on: date))
     }
 
     func date(for index: Int) -> Date {
-        dayStart.addingTimeInterval(Double(index * Self.blockMinutes) * 60)
+        date(for: index, on: dayStart)
+    }
+
+    func date(for index: Int, on date: Date) -> Date {
+        let start = timelineDayStart(for: date)
+        return start.addingTimeInterval(Double(index * Self.blockMinutes) * 60)
     }
 
     func category(for id: UUID) -> TaskCategory? {
@@ -341,17 +358,27 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func isHourBoundaryBlock(index: Int) -> Bool {
+        isHourBoundaryBlock(index: index, on: dayStart)
+    }
+
+    func isHourBoundaryBlock(index: Int, on date: Date) -> Bool {
         let blockMinutes = Self.blockMinutes
         guard blockMinutes > 0 else { return false }
         let minutesFromStart = index * blockMinutes
-        let targetDate = dayStart.addingTimeInterval(Double(minutesFromStart * 60))
+        let start = timelineDayStart(for: date)
+        let targetDate = start.addingTimeInterval(Double(minutesFromStart * 60))
         let minute = calendar.component(.minute, from: targetDate)
         return minute == 0
     }
 
     func hourNumber(for index: Int) -> Int {
+        hourNumber(for: index, on: dayStart)
+    }
+
+    func hourNumber(for index: Int, on date: Date) -> Int {
         let minutesFromStart = index * Self.blockMinutes
-        let targetDate = dayStart.addingTimeInterval(Double(minutesFromStart * 60))
+        let start = timelineDayStart(for: date)
+        let targetDate = start.addingTimeInterval(Double(minutesFromStart * 60))
         return calendar.component(.hour, from: targetDate)
     }
 
@@ -1127,6 +1154,36 @@ extension ScheduleViewModel {
         } else {
             return calendar.date(byAdding: .day, value: -1, to: anchor) ?? anchor
         }
+    }
+
+    func timelineDayStart(for date: Date) -> Date {
+        Self.dailyStart(for: date, calendar: calendar)
+    }
+
+    func timelineDayEnd(for date: Date) -> Date {
+        let start = timelineDayStart(for: date)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+        return calendar.startOfDay(for: nextDay)
+    }
+
+    func totalBlocks(for date: Date) -> Int {
+        let start = timelineDayStart(for: date)
+        let end = timelineDayEnd(for: date)
+        return max(1, Int(end.timeIntervalSince(start) / Double(Self.blockMinutes * 60)))
+    }
+
+    func timelineTasks(for date: Date) -> [TaskItem] {
+        if calendar.isDate(date, inSameDayAs: dayStart) {
+            return tasks
+        }
+        if let log = dayLogs.first(where: { calendar.isDate($0.date, inSameDayAs: date) }) {
+            return log.tasks
+        }
+        return []
+    }
+
+    func isCurrentDay(_ date: Date) -> Bool {
+        calendar.isDate(date, inSameDayAs: dayStart)
     }
 }
 
