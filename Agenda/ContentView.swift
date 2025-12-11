@@ -65,10 +65,10 @@ struct DayTimelineView: View {
     @State private var selectedDate: Date
 
     private let blockHeight: CGFloat = 56
-    private static let headerDateFormatter: DateFormatter = {
+    private static let navigationDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .full
-        formatter.timeStyle = .none
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "EEE dd MMM"
         return formatter
     }()
     @State private var selectedBlockIndex: Int?
@@ -148,7 +148,8 @@ struct DayTimelineView: View {
                 liveTime = date
                 handlePauseProgress(at: date)
             }
-            .navigationTitle("Agenda diaria")
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Tipo de tarea", isPresented: $showCategoryPicker, presenting: selectedBlockIndex) { index in
                 ForEach(viewModel.categories) { category in
                     Button(category.name) {
@@ -386,51 +387,34 @@ struct DayTimelineView: View {
     }
 
     private var daySelector: some View {
-        VStack(spacing: 6) {
+        HStack(spacing: 24) {
+            Button {
+                shiftSelectedDate(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.headline)
+            }
+            .buttonStyle(.borderless)
+
             Text(selectedDateLabel)
                 .font(.headline)
-            HStack(spacing: 16) {
-                Button {
-                    shiftSelectedDate(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline)
-                }
-                .buttonStyle(.borderless)
+                .frame(maxWidth: .infinity)
 
-                Spacer(minLength: 0)
-
-                DatePicker("", selection: datePickerBinding, displayedComponents: .date)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    shiftSelectedDate(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.headline)
-                }
-                .buttonStyle(.borderless)
+            Button {
+                shiftSelectedDate(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.headline)
             }
+            .buttonStyle(.borderless)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color(.systemGray6))
     }
 
-    private var datePickerBinding: Binding<Date> {
-        Binding(
-            get: { selectedDate },
-            set: { newValue in
-                updateSelectedDate(newValue)
-            }
-        )
-    }
-
     private var selectedDateLabel: String {
-        Self.headerDateFormatter.string(from: selectedDate)
+        Self.navigationDateFormatter.string(from: selectedDate)
     }
 
     private func shiftSelectedDate(by days: Int) {
