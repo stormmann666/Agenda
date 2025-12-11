@@ -45,8 +45,35 @@ struct OneThingEntry: Identifiable, Codable, Hashable {
         return formatter
     }()
 
+    private static let isoDateTimeFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
+    private static let isoDateTimeFractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
     static func parse(dateString: String) -> Date {
-        dateFormatter.date(from: dateString) ?? Date()
+        if let date = dateFormatter.date(from: dateString) {
+            return date
+        }
+        if let fullDate = isoDateTimeFormatter.date(from: dateString) {
+            return fullDate
+        }
+        if let fractionalDate = isoDateTimeFractionalFormatter.date(from: dateString) {
+            return fractionalDate
+        }
+        if let trimmed = dateString.split(separator: "T").first,
+           let date = dateFormatter.date(from: String(trimmed)) {
+            return date
+        }
+        return Date()
     }
 }
 
