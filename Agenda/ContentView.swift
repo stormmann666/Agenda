@@ -62,8 +62,15 @@ private enum FocusDataSource: String, CaseIterable, Identifiable {
 
 struct DayTimelineView: View {
     @ObservedObject var viewModel: ScheduleViewModel
+    @State private var selectedDate: Date
 
     private let blockHeight: CGFloat = 56
+    private static let headerDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        return formatter
+    }()
     @State private var selectedBlockIndex: Int?
     @State private var showCategoryPicker = false
     @State private var editingTask: TaskItem?
@@ -85,44 +92,57 @@ struct DayTimelineView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showingEndDayConfirmation = false
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    
+    init(viewModel: ScheduleViewModel) {
+        _viewModel = ObservedObject(initialValue: viewModel)
+        _selectedDate = State(initialValue: viewModel.dayStart)
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        let blocks = viewModel.timelineBlocks()
-                        ForEach(blocks) { block in
-                            let isHourStart = viewModel.isHourBoundaryBlock(index: block.index)
-                            if isHourStart {
-                                HourMarkerView(label: hourRangeLabel(for: block.index))
-                                    .padding(.bottom, 2)
-                            }
-                            HStack(alignment: .top, spacing: 12) {
-                                Text(viewModel.label(for: block.index))
-                                    .font(.caption)
-                                    .frame(width: 60, alignment: .trailing)
-                                    .padding(.top, 8)
+            VStack(spacing: 0) {
+                daySelector
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            let blocks = viewModel.timelineBlocks(for: selectedDate)
+                            let isActiveDay = viewModel.isCurrentDay(selectedDate)
+                            ForEach(blocks) { block in
+                                let isHourStart = viewModel.isHourBoundaryBlock(index: block.index, on: selectedDate)
+                                if isHourStart {
+                                    HourMarkerView(label: hourRangeLabel(for: block.index, on: selectedDate))
+                                        .padding(.bottom, 2)
+                                }
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text(viewModel.label(for: block.index, on: selectedDate))
+                                        .font(.caption)
+                                        .frame(width: 60, alignment: .trailing)
+                                        .padding(.top, 8)
 
-                                blockContent(for: block)
+                                    blockContent(for: block, dayDate: selectedDate, isActiveDay: isActiveDay)
+                                }
+                                .padding(.vertical, 2)
+                                .id(block.index)
                             }
-                            .padding(.vertical, 2)
-                            .id(block.index)
                         }
+                        .padding(.horizontal)
+                        .id(timelineRefreshID)
                     }
-                    .padding(.horizontal)
-                    .id(timelineRefreshID)
-                }
-                .onAppear {
-                    scrollProxy = proxy
-                    scrollToCurrentHour(animated: false)
-                }
-                .onChange(of: timelineRefreshID) { _ in
-                    scrollToCurrentHour(animated: false)
+                    .onAppear {
+                        scrollProxy = proxy
+                        scrollToCurrentHour(animated: false, targetDate: selectedDate)
+                    }
+                    .onChange(of: timelineRefreshID) { _ in
+                        scrollToCurrentHour(animated: false, targetDate: selectedDate)
+                    }
                 }
             }
+            .onChange(of: selectedDate) { _ in
+                timelineRefreshID = UUID()
+                scrollToCurrentHour(animated: false, targetDate: selectedDate)
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                scrollToCurrentHour(animated: false)
+                scrollToCurrentHour(animated: false, targetDate: selectedDate)
             }
             .onReceive(liveTimer) { date in
                 liveTime = date
@@ -179,8 +199,9 @@ struct DayTimelineView: View {
             .alert("Terminar día", isPresented: $showingEndDayConfirmation) {
                 Button("Terminar", role: .destructive) {
                     viewModel.endCurrentDay()
+                    updateSelectedDate(viewModel.dayStart, force: true)
                     timelineRefreshID = UUID()
-                    scrollToCurrentHour(animated: false)
+                    scrollToCurrentHour(animated: false, targetDate: selectedDate)
                 }
                 Button("Cancelar", role: .cancel) { }
             } message: {
@@ -189,10 +210,11 @@ struct DayTimelineView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        scrollToCurrentHour(animated: true)
+                        scrollToCurrentHour(animated: true, targetDate: selectedDate)
                     } label: {
                         Image(systemName: "play.fill")
                     }
+                    .disabled(!viewModel.isCurrentDay(selectedDate))
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -200,6 +222,7 @@ struct DayTimelineView: View {
                     } label: {
                         Image(systemName: "flag.checkered")
                     }
+                    .disabled(!viewModel.isCurrentDay(selectedDate))
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -207,25 +230,28 @@ struct DayTimelineView: View {
                     } label: {
                         Image(systemName: "trash")
                     }
-                    .disabled(viewModel.tasks.isEmpty)
+                    .disabled(!viewModel.isCurrentDay(selectedDate) || viewModel.tasks.isEmpty)
                 }
             }
         }
     }
 
-    private var currentAnchorIndex: Int {
-        let diff = Date().timeIntervalSince(viewModel.dayStart)
+    private func currentAnchorIndex(for date: Date) -> Int {
+        guard viewModel.isCurrentDay(date) else { return 0 }
+        let start = viewModel.timelineDayStart(for: date)
+        let diff = Date().timeIntervalSince(start)
         let blockSeconds = Double(ScheduleViewModel.blockMinutes) * 60
         if diff <= 0 {
             return 0
         }
-        return min(viewModel.totalBlocks - 1, Int(diff / blockSeconds))
+        let total = viewModel.totalBlocks(for: date)
+        return min(total - 1, Int(diff / blockSeconds))
     }
 
     @ViewBuilder
-    private func blockContent(for block: TimelineBlock) -> some View {
+    private func blockContent(for block: TimelineBlock, dayDate: Date, isActiveDay: Bool) -> some View {
         let height = blockHeight * CGFloat(block.span)
-        let liveLineOffset = liveIndicatorOffset(for: block)
+        let liveLineOffset = isActiveDay ? liveIndicatorOffset(for: block, on: dayDate) : nil
 
         ZStack(alignment: .topLeading) {
             if let task = block.task, let category = viewModel.category(for: task.categoryID) {
@@ -234,108 +260,108 @@ struct DayTimelineView: View {
                 let isDragging = draggingTaskID == task.id
                 let isMoveMode = moveModeTaskID == task.id
                 let isSelected = selectedTaskID == task.id
-            let isCompleted = task.isCompleted
-            let liveStatus = liveStatusInfo(for: task)
-            let focusLabel = focusDisplayLabel(for: task)
-            let isFocusIndeterminate = task.isFocusIndeterminate
+                let isCompleted = task.isCompleted
+                let liveStatus = isActiveDay ? liveStatusInfo(for: task, on: dayDate) : nil
+                let focusLabel = focusDisplayLabel(for: task)
+                let isFocusIndeterminate = task.isFocusIndeterminate
 
-            HStack(spacing: 8) {
-                VStack(spacing: 4) {
-                    ZStack(alignment: .topTrailing) {
-                        TaskCardView(category: category,
-                                     height: taskHeight,
-                                     durationMinutes: displayDuration * ScheduleViewModel.blockMinutes,
-                                     dragOffset: isDragging ? dragOffset : 0,
-                                     isDragging: isDragging,
-                                     isResizing: resizingTaskID == task.id,
-                                     isMoveModeActive: isMoveMode,
-                                     isSelected: isSelected,
-                                     isCompleted: isCompleted,
-                                     liveStatus: liveStatus,
-                                     focusLabel: focusLabel,
-                                     isFocusIndeterminate: isFocusIndeterminate)
-                            .contentShape(Rectangle())
-                            .contextMenu {
-                                Button {
-                                    finishTaskNow(task)
-                                } label: {
-                                    Label("Terminar Box", systemImage: "flag.checkered")
+                HStack(spacing: 8) {
+                    VStack(spacing: 4) {
+                        ZStack(alignment: .topTrailing) {
+                            TaskCardView(category: category,
+                                         height: taskHeight,
+                                         durationMinutes: displayDuration * ScheduleViewModel.blockMinutes,
+                                         dragOffset: isDragging ? dragOffset : 0,
+                                         isDragging: isDragging,
+                                         isResizing: resizingTaskID == task.id,
+                                         isMoveModeActive: isMoveMode,
+                                         isSelected: isSelected,
+                                         isCompleted: isCompleted,
+                                         liveStatus: liveStatus,
+                                         focusLabel: focusLabel,
+                                         isFocusIndeterminate: isFocusIndeterminate)
+                                .contentShape(Rectangle())
+                                .contextMenu {
+                                    Button {
+                                        finishTaskNow(task)
+                                    } label: {
+                                        Label("Terminar Box", systemImage: "flag.checkered")
+                                    }
                                 }
-                            }
-                            .simultaneousGesture(resizeGesture(for: task))
-                            .onTapGesture {
-                                selectedTaskID = task.id
-                            }
-                            .onTapGesture(count: 2) {
-                                editingTask = task
-                                selectedTaskID = task.id
-                            }
+                                .simultaneousGesture(resizeGesture(for: task))
+                                .onTapGesture {
+                                    selectedTaskID = task.id
+                                }
+                                .onTapGesture(count: 2) {
+                                    editingTask = task
+                                    selectedTaskID = task.id
+                                }
 
-                        HStack(spacing: 6) {
-                            Button {
-                                viewModel.toggleCompletion(for: task)
-                            } label: {
-                                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                                    .font(.headline)
-                                    .foregroundColor(task.isCompleted ? .green : .gray)
-                                    .padding(6)
-                            }
-                            .buttonStyle(.plain)
+                            HStack(spacing: 6) {
+                                Button {
+                                    viewModel.toggleCompletion(for: task)
+                                } label: {
+                                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                                        .font(.headline)
+                                        .foregroundColor(task.isCompleted ? .green : .gray)
+                                        .padding(6)
+                                }
+                                .buttonStyle(.plain)
 
-                            Button {
-                                toggleFocusState(for: task)
-                            } label: {
-                                let color = focusIndicatorColor(for: task)
-                                Image(systemName: "target")
-                                    .font(.headline)
-                                    .foregroundColor(color)
-                                    .padding(6)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(color.opacity(0.6), lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(.plain)
+                                Button {
+                                    toggleFocusState(for: task)
+                                } label: {
+                                    let color = focusIndicatorColor(for: task)
+                                    Image(systemName: "target")
+                                        .font(.headline)
+                                        .foregroundColor(color)
+                                        .padding(6)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(color.opacity(0.6), lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
 
-                            Button {
-                                taskPendingDeletion = task
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.caption)
-                                    .padding(8)
-                                    .background(Color.red.opacity(0.18))
-                                    .clipShape(Circle())
+                                Button {
+                                    taskPendingDeletion = task
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                        .padding(8)
+                                        .background(Color.red.opacity(0.18))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            .padding(8)
                         }
-                        .padding(8)
+
+                        if let liveStatus {
+                            LiveStatusBar(status: liveStatus)
+                        }
                     }
 
-                    if let liveStatus {
-                        LiveStatusBar(status: liveStatus)
-                    }
+                    MoveHandleView(height: taskHeight,
+                                   isActive: isMoveMode,
+                                   onStart: {
+                                       beginMove(for: task)
+                                   },
+                                   onChanged: { offset in
+                                       handleMoveDragChanged(for: task, offset: offset)
+                                   },
+                                   onEnded: { offset in
+                                       handleMoveDragEnded(for: task, offset: offset)
+                                   })
                 }
-
-                MoveHandleView(height: taskHeight,
-                               isActive: isMoveMode,
-                               onStart: {
-                                   beginMove(for: task)
-                               },
-                               onChanged: { offset in
-                                   handleMoveDragChanged(for: task, offset: offset)
-                               },
-                               onEnded: { offset in
-                                   handleMoveDragEnded(for: task, offset: offset)
-                               })
-            }
-        } else {
-            let hourNumber = viewModel.hourNumber(for: block.index)
-            let strokeColor = hourStrokeColor(forHour: hourNumber)
-                    EmptySlot(height: height, strokeColor: strokeColor)
-                        .onTapGesture {
-                            selectedBlockIndex = block.index
-                            showCategoryPicker = true
-                        }
+            } else {
+                let hourNumber = viewModel.hourNumber(for: block.index, on: dayDate)
+                let strokeColor = hourStrokeColor(forHour: hourNumber)
+                EmptySlot(height: height, strokeColor: strokeColor)
+                    .onTapGesture {
+                        selectedBlockIndex = block.index
+                        showCategoryPicker = true
+                    }
             }
 
             if let liveLineOffset {
@@ -356,6 +382,80 @@ struct DayTimelineView: View {
                 .offset(y: liveLineOffset - 1)
             }
         }
+        .allowsHitTesting(isActiveDay)
+    }
+
+    private var daySelector: some View {
+        VStack(spacing: 6) {
+            Text(selectedDateLabel)
+                .font(.headline)
+            HStack(spacing: 16) {
+                Button {
+                    shiftSelectedDate(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderless)
+
+                Spacer(minLength: 0)
+
+                DatePicker("", selection: datePickerBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    shiftSelectedDate(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray6))
+    }
+
+    private var datePickerBinding: Binding<Date> {
+        Binding(
+            get: { selectedDate },
+            set: { newValue in
+                updateSelectedDate(newValue)
+            }
+        )
+    }
+
+    private var selectedDateLabel: String {
+        Self.headerDateFormatter.string(from: selectedDate)
+    }
+
+    private func shiftSelectedDate(by days: Int) {
+        guard let newDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) else { return }
+        updateSelectedDate(newDate, force: true)
+    }
+
+    private func updateSelectedDate(_ rawDate: Date, force: Bool = false) {
+        let normalized = viewModel.timelineDayStart(for: rawDate)
+        if !force && normalized == selectedDate {
+            return
+        }
+        clearTransientSelections()
+        selectedDate = normalized
+    }
+
+    private func clearTransientSelections() {
+        selectedBlockIndex = nil
+        showCategoryPicker = false
+        editingTask = nil
+        taskPendingDeletion = nil
+        draggingTaskID = nil
+        resizingTaskID = nil
+        moveModeTaskID = nil
+        selectedTaskID = nil
     }
 
     private func addTask(at index: Int, with category: TaskCategory) {
@@ -427,9 +527,10 @@ struct DayTimelineView: View {
         return Color.gray.opacity(0.7)
     }
 
-    private func liveStatusInfo(for task: TaskItem) -> LiveStatusInfo? {
-        let startDate = viewModel.date(for: task.startIndex)
-        let endDate = viewModel.date(for: task.startIndex + task.duration)
+    private func liveStatusInfo(for task: TaskItem, on date: Date) -> LiveStatusInfo? {
+        guard viewModel.isCurrentDay(date) else { return nil }
+        let startDate = viewModel.date(for: task.startIndex, on: date)
+        let endDate = viewModel.date(for: task.startIndex + task.duration, on: date)
         guard liveTime >= startDate, liveTime < endDate else { return nil }
         let total = endDate.timeIntervalSince(startDate)
         guard total > 0 else { return nil }
@@ -450,9 +551,10 @@ struct DayTimelineView: View {
         return focus.name
     }
 
-    private func liveIndicatorOffset(for block: TimelineBlock) -> CGFloat? {
+    private func liveIndicatorOffset(for block: TimelineBlock, on date: Date) -> CGFloat? {
+        guard viewModel.isCurrentDay(date) else { return nil }
         let blockStart = block.startDate
-        let blockEnd = viewModel.date(for: block.index + block.span)
+        let blockEnd = viewModel.date(for: block.index + block.span, on: date)
         guard liveTime >= blockStart, liveTime < blockEnd else { return nil }
         let total = blockEnd.timeIntervalSince(blockStart)
         guard total > 0 else { return nil }
@@ -474,8 +576,8 @@ struct DayTimelineView: View {
         return formatter.string(from: liveTime)
     }
 
-    private func hourRangeLabel(for index: Int) -> String {
-        let startDate = viewModel.date(for: index)
+    private func hourRangeLabel(for index: Int, on date: Date) -> String {
+        let startDate = viewModel.date(for: index, on: date)
         let calendar = Calendar.current
         let startHour = calendar.component(.hour, from: startDate)
         let endHour = (startHour + 1) % 24
@@ -490,9 +592,9 @@ struct DayTimelineView: View {
         }
     }
 
-    private func scrollToCurrentHour(animated: Bool) {
+    private func scrollToCurrentHour(animated: Bool, targetDate: Date) {
         guard let proxy = scrollProxy else { return }
-        let target = currentAnchorIndex
+        let target = currentAnchorIndex(for: targetDate)
         if animated {
             withAnimation {
                 proxy.scrollTo(target, anchor: .top)
@@ -505,11 +607,11 @@ struct DayTimelineView: View {
     private func handlePauseProgress(at currentDate: Date) { }
 
     private func currentTask(at date: Date) -> TaskItem? {
-        let blocks = viewModel.timelineBlocks()
+        let blocks = viewModel.timelineBlocks(for: selectedDate)
         return blocks.first { block in
             guard let task = block.task else { return false }
-            let startDate = viewModel.date(for: block.index)
-            let endDate = viewModel.date(for: block.index + task.duration)
+            let startDate = viewModel.date(for: block.index, on: selectedDate)
+            let endDate = viewModel.date(for: block.index + task.duration, on: selectedDate)
             return date >= startDate && date < endDate
         }?.task
     }
