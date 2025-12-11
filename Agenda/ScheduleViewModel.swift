@@ -1070,6 +1070,38 @@ struct ScheduleDayLog: Identifiable, Codable {
         self.date = date
         self.tasks = tasks
     }
+
+    struct FocusStatistics {
+        let totalHours: Double
+        let focusedHours: Double
+        let indeterminateFocusHours: Double
+        let unfocusedHours: Double
+    }
+
+    func focusStatistics(blockMinutes: Int = ScheduleViewModel.blockMinutes) -> FocusStatistics {
+        let blockHours = Double(blockMinutes) / 60.0
+        var total: Double = 0
+        var focused: Double = 0
+        var indeterminate: Double = 0
+        var unfocused: Double = 0
+
+        for task in tasks {
+            let hours = Double(task.duration) * blockHours
+            total += hours
+            if task.isFocusIndeterminate {
+                indeterminate += hours
+            } else if task.focusID != nil {
+                focused += hours
+            } else {
+                unfocused += hours
+            }
+        }
+
+        return FocusStatistics(totalHours: total,
+                               focusedHours: focused,
+                               indeterminateFocusHours: indeterminate,
+                               unfocusedHours: unfocused)
+    }
 }
 
 struct UserDefaultsFocusStorage: FocusStorageProvider {
