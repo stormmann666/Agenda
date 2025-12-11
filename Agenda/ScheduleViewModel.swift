@@ -1217,6 +1217,12 @@ extension ScheduleViewModel {
     func isCurrentDay(_ date: Date) -> Bool {
         calendar.isDate(date, inSameDayAs: dayStart)
     }
+
+    func focusStats(for date: Date) -> ScheduleDayLog.FocusStatistics {
+        let tasks = timelineTasks(for: date)
+        let log = ScheduleDayLog(date: timelineDayStart(for: date), tasks: tasks)
+        return log.focusStatistics(blockMinutes: Self.blockMinutes)
+    }
 }
 
 extension Color {

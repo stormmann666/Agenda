@@ -91,6 +91,7 @@ struct DayTimelineView: View {
     @State private var timelineRefreshID = UUID()
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showingEndDayConfirmation = false
+    @State private var statsAlertText: String?
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     init(viewModel: ScheduleViewModel) {
@@ -208,6 +209,16 @@ struct DayTimelineView: View {
             } message: {
                 Text("Se guardará el día actual y se iniciará uno nuevo.")
             }
+            .alert("Estadísticas del día", isPresented: Binding(
+                get: { statsAlertText != nil },
+                set: { if !$0 { statsAlertText = nil } })
+            ) {
+                Button("Cerrar", role: .cancel) {
+                    statsAlertText = nil
+                }
+            } message: {
+                Text(statsAlertText ?? "")
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -216,6 +227,13 @@ struct DayTimelineView: View {
                         Image(systemName: "play.fill")
                     }
                     .disabled(!viewModel.isCurrentDay(selectedDate))
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        presentStats()
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                    }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -440,6 +458,39 @@ struct DayTimelineView: View {
         resizingTaskID = nil
         moveModeTaskID = nil
         selectedTaskID = nil
+    }
+
+    private func presentStats() {
+        let stats = viewModel.focusStats(for: selectedDate)
+        statsAlertText = statsDescription(for: stats)
+    }
+
+    private func statsDescription(for stats: ScheduleDayLog.FocusStatistics) -> String {
+        func format(_ hours: Double) -> String {
+            let totalMinutes = Int(round(hours * 60))
+            let h = totalMinutes / 60
+            let m = totalMinutes % 60
+            switch (h, m) {
+            case (0, let minutes):
+                return "\(minutes)m"
+            case (let hours, 0):
+                return "\(hours)h"
+            default:
+                return "\(h)h \(m)m"
+            }
+        }
+
+        let total = format(stats.totalHours)
+        let focused = format(stats.focusedHours)
+        let indeterminate = format(stats.indeterminateFocusHours)
+        let unfocused = format(stats.unfocusedHours)
+
+        return """
+Total estudiado: \(total)
+Con focus: \(focused)
+Focus indeterminado: \(indeterminate)
+Sin focus: \(unfocused)
+"""
     }
 
     private func addTask(at index: Int, with category: TaskCategory) {
