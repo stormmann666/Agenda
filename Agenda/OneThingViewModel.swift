@@ -68,6 +68,10 @@ final class OneThingViewModel: ObservableObject {
         }
     }
 
+    func selectDate(_ date: Date) {
+        selectedDate = calendar.startOfDay(for: date)
+    }
+
     func incrementReviewCount() {
         guard var entry = currentEntry else { return }
         entry.reviewCount += 1

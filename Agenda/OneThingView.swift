@@ -12,24 +12,23 @@ struct OneThingView: View {
     @State private var newSeries: String = ""
     @State private var newURL: String = ""
     @State private var newDescription: String = ""
+    @State private var viewMode: ViewMode = .day
+
+    private enum ViewMode: String, CaseIterable, Identifiable {
+        case day = "Dia"
+        case list = "Lista"
+
+        var id: String { rawValue }
+    }
 
     var body: some View {
         NavigationStack {
-            Form {
-                navigationSection
-                currentEntrySection
-                creationSection
-                if let error = viewModel.errorMessage {
-                    Section("Error") {
-                        Text(error)
-                            .foregroundColor(.red)
-                    }
-                }
-                if let status = viewModel.statusMessage {
-                    Section("Estado") {
-                        Text(status)
-                            .foregroundColor(.secondary)
-                    }
+            Group {
+                switch viewMode {
+                case .day:
+                    dayView
+                case .list:
+                    listView
                 }
             }
             .navigationTitle("OneThing")
@@ -49,6 +48,61 @@ struct OneThingView: View {
             .task {
                 await viewModel.loadEntries()
             }
+        }
+    }
+
+    private var dayView: some View {
+        Form {
+            modeSection
+            navigationSection
+            currentEntrySection
+            creationSection
+            statusSections
+        }
+    }
+
+    private var listView: some View {
+        List {
+            modeSection
+            if viewModel.entries.isEmpty {
+                Text("Todavia no hay OneThings.")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(viewModel.entries) { entry in
+                    Button {
+                        viewModel.selectDate(entry.date)
+                        syncInputsWithCurrentEntry()
+                        viewMode = .day
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(entry.formattedDate)
+                                .font(.headline)
+                            if !entry.series.isEmpty {
+                                Text(entry.series)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            Text(excerpt(for: entry))
+                                .font(.body)
+                                .lineLimit(3)
+                        }
+                    }
+                }
+            }
+            statusSections
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private var modeSection: some View {
+        Section {
+            Picker("Vista", selection: $viewMode) {
+                ForEach(ViewMode.allCases) { mode in
+                    Text(mode.rawValue)
+                        .tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
         }
     }
 
@@ -75,6 +129,23 @@ struct OneThingView: View {
                     Image(systemName: "chevron.right")
                 }
                 .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var statusSections: some View {
+        Group {
+            if let error = viewModel.errorMessage {
+                Section("Error") {
+                    Text(error)
+                        .foregroundColor(.red)
+                }
+            }
+            if let status = viewModel.statusMessage {
+                Section("Estado") {
+                    Text(status)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
@@ -153,5 +224,19 @@ struct OneThingView: View {
         } else {
             clearInputs()
         }
+    }
+
+    private func excerpt(for entry: OneThingEntry) -> String {
+        let trimmed = entry.details.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Sin detalles."
+        }
+        let lines = trimmed.split(whereSeparator: \.isNewline)
+        let preview = lines.prefix(2).joined(separator: " ")
+        let limit = 160
+        if preview.count > limit {
+            return String(preview.prefix(limit)) + "..."
+        }
+        return preview
     }
 }
