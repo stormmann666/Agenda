@@ -307,14 +307,19 @@ struct DayTimelineView: View {
                                         Label("Terminar Box", systemImage: "flag.checkered")
                                     }
                                 }
-                                .simultaneousGesture(resizeGesture(for: task))
-                                .onTapGesture {
-                                    selectedTaskID = task.id
-                                }
-                                .onTapGesture(count: 2) {
-                                    editingTask = task
-                                    selectedTaskID = task.id
-                                }
+                                .highPriorityGesture(
+                                    TapGesture(count: 2)
+                                        .onEnded {
+                                            editingTask = task
+                                            selectedTaskID = task.id
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    TapGesture()
+                                        .onEnded {
+                                            selectedTaskID = task.id
+                                        }
+                                )
 
                             HStack(spacing: 6) {
                                 Button {
@@ -399,6 +404,7 @@ struct DayTimelineView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .offset(x: -48)
                 .offset(y: liveLineOffset - 1)
+                .allowsHitTesting(false)
             }
         }
         .allowsHitTesting(isActiveDay)
