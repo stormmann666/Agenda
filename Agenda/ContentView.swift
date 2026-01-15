@@ -299,27 +299,21 @@ struct DayTimelineView: View {
                                          liveStatus: liveStatus,
                                          focusLabel: focusLabel,
                                          isFocusIndeterminate: isFocusIndeterminate)
-                                .contentShape(Rectangle())
-                                .contextMenu {
-                                    Button {
-                                        finishTaskNow(task)
-                                    } label: {
-                                        Label("Terminar Box", systemImage: "flag.checkered")
+                            .contentShape(Rectangle())
+                            .gesture(
+                                TapGesture(count: 2)
+                                    .onEnded {
+                                        editingTask = task
+                                        selectedTaskID = task.id
                                     }
-                                }
-                                .highPriorityGesture(
-                                    TapGesture(count: 2)
-                                        .onEnded {
-                                            editingTask = task
-                                            selectedTaskID = task.id
-                                        }
-                                )
-                                .simultaneousGesture(
-                                    TapGesture()
-                                        .onEnded {
-                                            selectedTaskID = task.id
-                                        }
-                                )
+                                    .exclusively(before: resizeGesture(for: task))
+                            )
+                            .simultaneousGesture(
+                                TapGesture()
+                                    .onEnded {
+                                        selectedTaskID = task.id
+                                    }
+                            )
 
                             HStack(spacing: 6) {
                                 Button {
