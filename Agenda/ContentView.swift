@@ -274,15 +274,16 @@ struct DayTimelineView: View {
 
         ZStack(alignment: .topLeading) {
             if let task = block.task, let category = viewModel.category(for: task.categoryID) {
+                let currentTask = isActiveDay ? (viewModel.task(with: task.id) ?? task) : task
                 let displayDuration = (resizingTaskID == task.id ? resizingPreviewDuration : task.duration)
                 let taskHeight = blockHeight * CGFloat(displayDuration)
                 let isDragging = draggingTaskID == task.id
                 let isMoveMode = moveModeTaskID == task.id
                 let isSelected = selectedTaskID == task.id
-                let isCompleted = task.isCompleted
+                let isCompleted = currentTask.isCompleted
                 let liveStatus = isActiveDay ? liveStatusInfo(for: task, on: dayDate) : nil
-                let focusLabel = focusDisplayLabel(for: task)
-                let isFocusIndeterminate = task.isFocusIndeterminate
+                let focusLabel = focusDisplayLabel(for: currentTask)
+                let isFocusIndeterminate = currentTask.isFocusIndeterminate
 
                 HStack(spacing: 8) {
                     VStack(spacing: 4) {
@@ -316,15 +317,16 @@ struct DayTimelineView: View {
                             )
 
                             HStack(spacing: 6) {
-                                Button {
-                                    viewModel.toggleCompletion(for: task)
-                                } label: {
-                                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                                        .font(.headline)
-                                        .foregroundColor(task.isCompleted ? .green : .gray)
-                                        .padding(6)
-                                }
-                                .buttonStyle(.plain)
+                                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .font(.headline)
+                                    .foregroundColor(isCompleted ? .green : .gray)
+                                    .padding(6)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        viewModel.toggleCompletion(for: currentTask)
+                                    }
+                                    .accessibilityLabel("Completar box")
+                                    .accessibilityAddTraits(.isButton)
 
                                 Button {
                                     toggleFocusState(for: task)
