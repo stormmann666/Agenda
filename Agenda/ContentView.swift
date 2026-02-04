@@ -317,16 +317,18 @@ struct DayTimelineView: View {
                             )
 
                             HStack(spacing: 6) {
-                                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                                    .font(.headline)
-                                    .foregroundColor(isCompleted ? .green : .gray)
-                                    .padding(6)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        viewModel.toggleCompletion(for: currentTask)
-                                    }
-                                    .accessibilityLabel("Completar box")
-                                    .accessibilityAddTraits(.isButton)
+                                Button {
+                                    viewModel.toggleCompletion(for: currentTask)
+                                } label: {
+                                    Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                                        .font(.headline)
+                                        .foregroundColor(isCompleted ? .green : .gray)
+                                        .frame(width: 34, height: 34)
+                                        .background(Circle().fill(Color(.systemBackground).opacity(0.9)))
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Completar box")
 
                                 Button {
                                     toggleFocusState(for: task)
@@ -335,11 +337,13 @@ struct DayTimelineView: View {
                                     Image(systemName: "target")
                                         .font(.headline)
                                         .foregroundColor(color)
-                                        .padding(6)
+                                        .frame(width: 34, height: 34)
+                                        .background(Circle().fill(Color(.systemBackground).opacity(0.9)))
                                         .overlay(
                                             Circle()
                                                 .stroke(color.opacity(0.6), lineWidth: 1)
                                         )
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
 
