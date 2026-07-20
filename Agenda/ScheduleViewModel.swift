@@ -174,7 +174,7 @@ struct TimelineBlock: Identifiable {
 }
 
 final class ScheduleViewModel: ObservableObject {
-    static let blockMinutes = 15
+    static let blockMinutes = 60
     private let categoryService: TaskCategoryRemoteService
     static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
     private static let appGroupID = "group.com.antoniomunoz.Agenda"
@@ -1174,8 +1174,8 @@ private extension Date {
 extension ScheduleViewModel {
     private static func dailyStart(for date: Date, calendar: Calendar) -> Date {
         var components = calendar.dateComponents([.year, .month, .day], from: date)
-        components.hour = 4
-        components.minute = 45
+        components.hour = 5
+        components.minute = 00
         components.second = 0
         components.nanosecond = 0
         guard let anchor = calendar.date(from: components) else {
