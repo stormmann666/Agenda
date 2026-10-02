@@ -174,7 +174,7 @@ struct TimelineBlock: Identifiable {
 }
 
 final class ScheduleViewModel: ObservableObject {
-    static let blockMinutes = 60
+    static let blockMinutes = 5
     private let categoryService: TaskCategoryRemoteService
     static var blocksPerHour: Int { max(1, 60 / blockMinutes) }
     private static let appGroupID = "group.com.antoniomunoz.Agenda"
