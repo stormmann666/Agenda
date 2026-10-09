@@ -1066,6 +1066,18 @@ private extension Color {
     }
 }
 
+private struct AvoidedScheduleWindow: Identifiable, Equatable {
+    let id: UUID
+    var start: Date
+    var end: Date
+
+    init(id: UUID = UUID(), referenceDate: Date = Date(), startHour: Int = 13, endHour: Int = 14) {
+        self.id = id
+        start = Calendar.current.date(bySettingHour: startHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate
+        end = Calendar.current.date(bySettingHour: endHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate.addingTimeInterval(3600)
+    }
+}
+
 struct FocusManagerView: View {
     @ObservedObject var viewModel: ScheduleViewModel
     @State private var showingAddFocus = false
@@ -1089,11 +1101,10 @@ struct FocusManagerView: View {
     @State private var showingPriorityAdjuster = false
     @State private var scheduleProposals: [FocusScheduleProposal] = []
     @State private var showingSchedulePreview = false
-    @State private var avoidsTimeRange = false
-    @State private var avoidedStartTime = Calendar.current.date(bySettingHour: 13, minute: 0, second: 0, of: Date()) ?? Date()
-    @State private var avoidedEndTime = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var avoidedTimeWindows: [AvoidedScheduleWindow] = []
     @State private var focusSessionMinutes = 30
     @State private var maximumConsecutiveFocusTypes = 2
+    @State private var breakMinutes = 0
 
     var body: some View {
         NavigationStack {
@@ -1295,15 +1306,36 @@ struct FocusManagerView: View {
                                     Text("\(count)").tag(count)
                                 }
                             }
-                            Toggle("Evitar un horario", isOn: $avoidsTimeRange)
-                            if avoidsTimeRange {
-                                DatePicker("Desde", selection: $avoidedStartTime, displayedComponents: .hourAndMinute)
-                                DatePicker("Hasta", selection: $avoidedEndTime, displayedComponents: .hourAndMinute)
-                                if avoidedEndTime <= avoidedStartTime {
-                                    Text("La hora final debe ser posterior a la inicial.")
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
+                            Picker("Descanso entre actividades", selection: $breakMinutes) {
+                                ForEach([0, 5, 10, 15, 20, 30], id: \.self) { minutes in
+                                    Text(minutes == 0 ? "Sin descanso" : "\(minutes) min").tag(minutes)
                                 }
+                            }
+                            ForEach($avoidedTimeWindows) { $window in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Horario a evitar")
+                                            .font(.subheadline.weight(.semibold))
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            avoidedTimeWindows.removeAll { $0.id == window.id }
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                    }
+                                    DatePicker("Desde", selection: $window.start, displayedComponents: .hourAndMinute)
+                                    DatePicker("Hasta", selection: $window.end, displayedComponents: .hourAndMinute)
+                                    if window.end <= window.start {
+                                        Text("La hora final debe ser posterior a la inicial.")
+                                            .font(.caption)
+                                            .foregroundStyle(.red)
+                                    }
+                                }
+                            }
+                            Button {
+                                avoidedTimeWindows.append(AvoidedScheduleWindow())
+                            } label: {
+                                Label("Añadir horario a evitar", systemImage: "plus.circle")
                             }
                             Text("Solo se incluyen focuses con prioridad entre 1 y 5. Los boxes existentes siempre se respetan.")
                                 .font(.subheadline)
@@ -1336,14 +1368,13 @@ struct FocusManagerView: View {
                             Button("Añadir a la agenda") {
                                 applyAutomaticSchedule()
                             }
-                            .disabled(scheduleProposals.isEmpty || (avoidsTimeRange && avoidedEndTime <= avoidedStartTime))
+                            .disabled(scheduleProposals.isEmpty || hasInvalidAvoidedWindow)
                         }
                     }
                     .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: avoidsTimeRange) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: avoidedStartTime) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: avoidedEndTime) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: avoidedTimeWindows) { _ in refreshAutomaticSchedule() }
                     .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
                 }
             }
@@ -1396,12 +1427,19 @@ struct FocusManagerView: View {
     private func refreshAutomaticSchedule() {
         scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
                                                            maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
-                                                           avoiding: avoidedScheduleRange)
+                                                           breakMinutes: breakMinutes,
+                                                           avoiding: avoidedScheduleRanges)
     }
 
-    private var avoidedScheduleRange: Range<Date>? {
-        guard avoidsTimeRange, avoidedStartTime < avoidedEndTime else { return nil }
-        return avoidedStartTime..<avoidedEndTime
+    private var avoidedScheduleRanges: [Range<Date>] {
+        avoidedTimeWindows.compactMap { window in
+            guard window.start < window.end else { return nil }
+            return window.start..<window.end
+        }
+    }
+
+    private var hasInvalidAvoidedWindow: Bool {
+        avoidedTimeWindows.contains { $0.end <= $0.start }
     }
 
     private func applyAutomaticSchedule() {

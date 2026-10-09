@@ -583,12 +583,14 @@ final class ScheduleViewModel: ObservableObject {
                               minimumSessionMinutes: Int = 15,
                               maximumSessionMinutes: Int = 30,
                               maximumConsecutiveSameCategory: Int = 2,
-                              avoiding avoidedTimeRange: Range<Date>? = nil) -> [FocusScheduleProposal] {
+                              breakMinutes: Int = 0,
+                              avoiding avoidedTimeRanges: [Range<Date>] = []) -> [FocusScheduleProposal] {
         guard let firstBlock = blockIndex(for: referenceDate), firstBlock < totalBlocks else { return [] }
         let minimumBlocks = max(1, Int(ceil(Double(minimumSessionMinutes) / Double(Self.blockMinutes))))
         let maximumBlocks = max(minimumBlocks, Int(ceil(Double(maximumSessionMinutes) / Double(Self.blockMinutes))))
+        let breakBlocks = max(0, Int(ceil(Double(breakMinutes) / Double(Self.blockMinutes))))
         var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
-        if let avoidedTimeRange, !avoidedTimeRange.isEmpty {
+        for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
             let blockSeconds = Double(Self.blockMinutes * 60)
             let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
             let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
@@ -682,7 +684,9 @@ final class ScheduleViewModel: ObservableObject {
                                                        categoryID: session.categoryID,
                                                        startIndex: range.lowerBound,
                                                        duration: duration))
-                range = (range.lowerBound + duration)..<range.upperBound
+                let taskEnd = range.lowerBound + duration
+                let nextStart = min(range.upperBound, taskEnd + breakBlocks)
+                range = nextStart..<range.upperBound
                 remaining -= duration
                 mutableRanges[index] = range
             }

@@ -86,7 +86,7 @@ final class ScheduleViewModelTests: XCTestCase {
 
         let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0),
                                                        maximumSessionMinutes: 15,
-                                                       avoiding: avoidedRange)
+                                                       avoiding: [avoidedRange])
 
         XCTAssertTrue(proposals.allSatisfy { $0.focusID == prioritized.id })
         XCTAssertTrue(proposals.allSatisfy { $0.duration <= 3 })
@@ -125,6 +125,28 @@ final class ScheduleViewModelTests: XCTestCase {
         viewModel.updateFocus(focus)
 
         XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0)).contains { $0.focusID == focus.id })
+    }
+
+    func testPlannerSupportsMultipleAvoidedWindowsAndBreaks() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let focus = FocusItem(name: "Largo", expectedMinutes: 90, proposedCategoryID: category.id, priority: 3)
+        viewModel.focuses = [focus]
+        let firstAvoided = viewModel.date(for: 9)..<viewModel.date(for: 12)
+        let secondAvoided = viewModel.date(for: 21)..<viewModel.date(for: 24)
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0),
+                                                       maximumSessionMinutes: 15,
+                                                       breakMinutes: 10,
+                                                       avoiding: [firstAvoided, secondAvoided])
+
+        XCTAssertFalse(proposals.contains { $0.startIndex < 12 && $0.startIndex + $0.duration > 9 })
+        XCTAssertFalse(proposals.contains { $0.startIndex < 24 && $0.startIndex + $0.duration > 21 })
+        for pair in zip(proposals, proposals.dropFirst()) where pair.0.startIndex + pair.0.duration <= pair.1.startIndex {
+            XCTAssertGreaterThanOrEqual(pair.1.startIndex - (pair.0.startIndex + pair.0.duration), 2)
+        }
     }
 
     /*
