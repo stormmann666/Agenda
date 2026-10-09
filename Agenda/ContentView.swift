@@ -1322,6 +1322,8 @@ struct FocusManagerView: View {
                                         } label: {
                                             Image(systemName: "trash")
                                         }
+                                        .buttonStyle(.borderless)
+                                        .accessibilityLabel("Eliminar horario a evitar")
                                     }
                                     DatePicker("Desde", selection: $window.start, displayedComponents: .hourAndMinute)
                                     DatePicker("Hasta", selection: $window.end, displayedComponents: .hourAndMinute)
