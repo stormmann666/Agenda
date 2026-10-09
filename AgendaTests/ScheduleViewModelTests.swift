@@ -166,6 +166,24 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(reflowed?.map(\.startIndex), [0, 8])
     }
 
+    func testReflowFocusScheduleClosesGapAfterRemovingProposal() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let focuses = (1...3).map {
+            FocusItem(name: "Focus \($0)", expectedMinutes: 15, proposedCategoryID: category.id, priority: 1)
+        }
+        viewModel.focuses = focuses
+        let original = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), maximumSessionMinutes: 15)
+        let remaining = [original[0], original[2]]
+
+        let reflowed = viewModel.reflowFocusSchedule(remaining, breakMinutes: 5)
+
+        XCTAssertEqual(reflowed?.map(\.focusID), remaining.map(\.focusID))
+        XCTAssertEqual(reflowed?.map(\.startIndex), [0, 4])
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)

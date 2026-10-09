@@ -75,6 +75,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `applyFocusSchedule` validates the preview again before atomically creating its boxes and focus links, preventing stale proposals from overlapping newer agenda changes.
   - The automatic-plan preview observes focus mutations and recalculates when priorities change; users can also trigger the same local recalculation with “Actualizar propuesta”.
   - Preview rows can be reordered before confirmation. `reflowFocusSchedule` recalculates their start times in the chosen order while preserving durations, breaks, existing boxes, and avoided windows.
+  - Preview rows can also be deleted in edit mode; the remaining proposal is reflowed to close the unused gap before confirmation.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
 ## Testing

@@ -1363,6 +1363,7 @@ struct FocusManagerView: View {
                                     scheduleProposalRow(proposal)
                                 }
                                 .onMove(perform: moveScheduleProposals)
+                                .onDelete(perform: deleteScheduleProposals)
                             }
                         }
                     }
@@ -1456,6 +1457,24 @@ struct FocusManagerView: View {
         } else {
             scheduleProposals = previous
             scheduleReorderMessage = "Ese orden no cabe en los huecos disponibles."
+        }
+    }
+
+    private func deleteScheduleProposals(at offsets: IndexSet) {
+        var remaining = scheduleProposals
+        remaining.remove(atOffsets: offsets)
+        if remaining.isEmpty {
+            scheduleProposals = []
+            scheduleReorderMessage = nil
+            return
+        }
+        if let reflowed = viewModel.reflowFocusSchedule(remaining,
+                                                        breakMinutes: breakMinutes,
+                                                        avoiding: avoidedScheduleRanges) {
+            scheduleProposals = reflowed
+            scheduleReorderMessage = nil
+        } else {
+            scheduleReorderMessage = "No se pudieron recolocar las tareas restantes."
         }
     }
 
