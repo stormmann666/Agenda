@@ -579,10 +579,24 @@ final class ScheduleViewModel: ObservableObject {
     /// Builds a non-destructive plan for the pending, estimable focuses.
     /// Existing boxes are never moved and already scheduled, unfinished focus time
     /// is deducted so running the planner repeatedly does not duplicate work.
-    func proposeFocusSchedule(from referenceDate: Date = Date(), minimumSessionMinutes: Int = 15) -> [FocusScheduleProposal] {
+    func proposeFocusSchedule(from referenceDate: Date = Date(),
+                              minimumSessionMinutes: Int = 15,
+                              maximumSessionMinutes: Int = 30,
+                              avoiding avoidedTimeRange: Range<Date>? = nil) -> [FocusScheduleProposal] {
         guard let firstBlock = blockIndex(for: referenceDate), firstBlock < totalBlocks else { return [] }
         let minimumBlocks = max(1, Int(ceil(Double(minimumSessionMinutes) / Double(Self.blockMinutes))))
-        let occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+        let maximumBlocks = max(minimumBlocks, Int(ceil(Double(maximumSessionMinutes) / Double(Self.blockMinutes))))
+        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+        if let avoidedTimeRange, !avoidedTimeRange.isEmpty {
+            let blockSeconds = Double(Self.blockMinutes * 60)
+            let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
+            let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
+            let avoidedStart = max(0, min(totalBlocks, rawStart))
+            let avoidedEnd = max(0, min(totalBlocks, rawEnd))
+            if avoidedStart < avoidedEnd {
+                occupied.append(avoidedStart..<avoidedEnd)
+            }
+        }
         var freeRanges: [Range<Int>] = []
         var cursor = firstBlock
 
@@ -600,6 +614,7 @@ final class ScheduleViewModel: ObservableObject {
 
         let candidates = focuses.compactMap { focus -> (FocusItem, Int)? in
             guard !(focus.isCompleted ?? false),
+                  focus.priority > 0,
                   let categoryID = focus.proposedCategoryID,
                   category(for: categoryID) != nil,
                   let expected = focus.expectedMinutes,
@@ -623,17 +638,18 @@ final class ScheduleViewModel: ObservableObject {
             guard let categoryID = focus.proposedCategoryID else { continue }
             var remaining = requiredBlocks
             for index in mutableRanges.indices where remaining > 0 {
-                let range = mutableRanges[index]
-                let available = range.count
-                guard available > 0 else { continue }
-                let duration = min(remaining, available)
-                guard duration >= minimumBlocks || remaining < minimumBlocks else { continue }
-                proposals.append(FocusScheduleProposal(focusID: focus.id,
-                                                       categoryID: categoryID,
-                                                       startIndex: range.lowerBound,
-                                                       duration: duration))
-                mutableRanges[index] = (range.lowerBound + duration)..<range.upperBound
-                remaining -= duration
+                var range = mutableRanges[index]
+                while remaining > 0 && !range.isEmpty {
+                    let duration = min(remaining, min(range.count, maximumBlocks))
+                    guard duration >= minimumBlocks || remaining < minimumBlocks else { break }
+                    proposals.append(FocusScheduleProposal(focusID: focus.id,
+                                                           categoryID: categoryID,
+                                                           startIndex: range.lowerBound,
+                                                           duration: duration))
+                    range = (range.lowerBound + duration)..<range.upperBound
+                    remaining -= duration
+                }
+                mutableRanges[index] = range
             }
         }
         return proposals

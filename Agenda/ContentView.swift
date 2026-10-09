@@ -1089,6 +1089,10 @@ struct FocusManagerView: View {
     @State private var showingPriorityAdjuster = false
     @State private var scheduleProposals: [FocusScheduleProposal] = []
     @State private var showingSchedulePreview = false
+    @State private var avoidsTimeRange = false
+    @State private var avoidedStartTime = Calendar.current.date(bySettingHour: 13, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var avoidedEndTime = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var focusSessionMinutes = 30
 
     var body: some View {
         NavigationStack {
@@ -1279,14 +1283,34 @@ struct FocusManagerView: View {
             .sheet(isPresented: $showingSchedulePreview) {
                 NavigationStack {
                     List {
-                        Section {
-                            Text("Se respetarán los boxes existentes. Los focuses se ordenan por prioridad y pueden dividirse entre varios huecos.")
+                        Section("Configuración") {
+                            Picker("Tiempo por tarea", selection: $focusSessionMinutes) {
+                                ForEach([15, 25, 30, 45, 60, 90], id: \.self) { minutes in
+                                    Text("\(minutes) min").tag(minutes)
+                                }
+                            }
+                            Toggle("Evitar un horario", isOn: $avoidsTimeRange)
+                            if avoidsTimeRange {
+                                DatePicker("Desde", selection: $avoidedStartTime, displayedComponents: .hourAndMinute)
+                                DatePicker("Hasta", selection: $avoidedEndTime, displayedComponents: .hourAndMinute)
+                                if avoidedEndTime <= avoidedStartTime {
+                                    Text("La hora final debe ser posterior a la inicial.")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                            Text("Solo se incluyen focuses con prioridad entre 1 y 5. Los boxes existentes siempre se respetan.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         Section("Propuesta") {
-                            ForEach(scheduleProposals) { proposal in
-                                scheduleProposalRow(proposal)
+                            if scheduleProposals.isEmpty {
+                                Text("No hay focuses prioritarios que puedan colocarse con esta configuración.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(scheduleProposals) { proposal in
+                                    scheduleProposalRow(proposal)
+                                }
                             }
                         }
                     }
@@ -1301,8 +1325,13 @@ struct FocusManagerView: View {
                             Button("Añadir a la agenda") {
                                 applyAutomaticSchedule()
                             }
+                            .disabled(scheduleProposals.isEmpty || (avoidsTimeRange && avoidedEndTime <= avoidedStartTime))
                         }
                     }
+                    .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: avoidsTimeRange) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: avoidedStartTime) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: avoidedEndTime) { _ in refreshAutomaticSchedule() }
                 }
             }
             .alert("Focus", isPresented: Binding(
@@ -1346,12 +1375,18 @@ struct FocusManagerView: View {
     }
 
     private func prepareAutomaticSchedule() {
-        scheduleProposals = viewModel.proposeFocusSchedule()
-        if scheduleProposals.isEmpty {
-            focusActionMessage = "No hay focuses planificables o huecos disponibles. Añade una estimación y un tipo propuesto a los focuses pendientes."
-        } else {
-            showingSchedulePreview = true
-        }
+        refreshAutomaticSchedule()
+        showingSchedulePreview = true
+    }
+
+    private func refreshAutomaticSchedule() {
+        scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
+                                                           avoiding: avoidedScheduleRange)
+    }
+
+    private var avoidedScheduleRange: Range<Date>? {
+        guard avoidsTimeRange, avoidedStartTime < avoidedEndTime else { return nil }
+        return avoidedStartTime..<avoidedEndTime
     }
 
     private func applyAutomaticSchedule() {

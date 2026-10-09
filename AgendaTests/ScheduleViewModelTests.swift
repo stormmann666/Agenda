@@ -75,6 +75,25 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0)).isEmpty)
     }
 
+    func testPlannerHonorsPriorityAvoidanceAndSessionLength() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let prioritized = FocusItem(name: "Prioritario", expectedMinutes: 60, proposedCategoryID: category.id, priority: 3)
+        let unprioritized = FocusItem(name: "Sin prioridad", expectedMinutes: 60, proposedCategoryID: category.id, priority: 0)
+        viewModel.focuses = [unprioritized, prioritized]
+        let avoidedRange = viewModel.date(for: 6)..<viewModel.date(for: 12)
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0),
+                                                       maximumSessionMinutes: 15,
+                                                       avoiding: avoidedRange)
+
+        XCTAssertTrue(proposals.allSatisfy { $0.focusID == prioritized.id })
+        XCTAssertTrue(proposals.allSatisfy { $0.duration <= 3 })
+        XCTAssertFalse(proposals.contains { $0.startIndex < 12 && $0.startIndex + $0.duration > 6 })
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)
