@@ -1076,6 +1076,29 @@ private struct AvoidedScheduleWindow: Identifiable, Equatable {
         start = Calendar.current.date(bySettingHour: startHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate
         end = Calendar.current.date(bySettingHour: endHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate.addingTimeInterval(3600)
     }
+
+    init(id: UUID = UUID(), referenceDate: Date = Date(), startMinutes: Int, endMinutes: Int) {
+        self.id = id
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: referenceDate)
+        start = calendar.date(byAdding: .minute, value: startMinutes, to: day) ?? day
+        end = calendar.date(byAdding: .minute, value: endMinutes, to: day) ?? day
+    }
+
+    var startMinutes: Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: start)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    var endMinutes: Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: end)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+}
+
+private struct PersistedAvoidedScheduleWindow: Codable {
+    let startMinutes: Int
+    let endMinutes: Int
 }
 
 struct FocusManagerView: View {
@@ -1106,6 +1129,14 @@ struct FocusManagerView: View {
     @State private var maximumConsecutiveFocusTypes = 2
     @State private var breakMinutes = 0
     @State private var scheduleReorderMessage: String?
+
+    private static let avoidedWindowsStorageKey = "agenda.autoFocus.avoidedWindows"
+    private static let appGroupID = "group.com.antoniomunoz.Agenda"
+
+    init(viewModel: ScheduleViewModel) {
+        _viewModel = ObservedObject(initialValue: viewModel)
+        _avoidedTimeWindows = State(initialValue: Self.loadAvoidedTimeWindows())
+    }
 
     var body: some View {
         NavigationStack {
@@ -1387,7 +1418,10 @@ struct FocusManagerView: View {
                     .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: avoidedTimeWindows) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: avoidedTimeWindows) { _ in
+                        saveAvoidedTimeWindows()
+                        refreshAutomaticSchedule()
+                    }
                     .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
                 }
             }
@@ -1487,6 +1521,33 @@ struct FocusManagerView: View {
 
     private var hasInvalidAvoidedWindow: Bool {
         avoidedTimeWindows.contains { $0.end <= $0.start }
+    }
+
+    private static var scheduleDefaults: UserDefaults {
+        UserDefaults(suiteName: appGroupID) ?? .standard
+    }
+
+    private static func loadAvoidedTimeWindows() -> [AvoidedScheduleWindow] {
+        guard let data = scheduleDefaults.data(forKey: avoidedWindowsStorageKey),
+              let stored = try? JSONDecoder().decode([PersistedAvoidedScheduleWindow].self, from: data) else {
+            return []
+        }
+        return stored.compactMap { item in
+            guard item.startMinutes >= 0,
+                  item.endMinutes <= 24 * 60,
+                  item.startMinutes < item.endMinutes else { return nil }
+            return AvoidedScheduleWindow(startMinutes: item.startMinutes, endMinutes: item.endMinutes)
+        }
+    }
+
+    private func saveAvoidedTimeWindows() {
+        let stored = avoidedTimeWindows.compactMap { window -> PersistedAvoidedScheduleWindow? in
+            guard window.start < window.end else { return nil }
+            return PersistedAvoidedScheduleWindow(startMinutes: window.startMinutes,
+                                                  endMinutes: window.endMinutes)
+        }
+        guard let data = try? JSONEncoder().encode(stored) else { return }
+        Self.scheduleDefaults.set(data, forKey: Self.avoidedWindowsStorageKey)
     }
 
     private func applyAutomaticSchedule() {
