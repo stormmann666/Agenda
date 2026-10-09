@@ -1105,6 +1105,7 @@ struct FocusManagerView: View {
     @State private var focusSessionMinutes = 30
     @State private var maximumConsecutiveFocusTypes = 2
     @State private var breakMinutes = 0
+    @State private var scheduleReorderMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -1349,6 +1350,11 @@ struct FocusManagerView: View {
                             }
                         }
                         Section("Propuesta") {
+                            if let scheduleReorderMessage {
+                                Text(scheduleReorderMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
                             if scheduleProposals.isEmpty {
                                 Text("No hay focuses prioritarios que puedan colocarse con esta configuración.")
                                     .foregroundStyle(.secondary)
@@ -1356,6 +1362,7 @@ struct FocusManagerView: View {
                                 ForEach(scheduleProposals) { proposal in
                                     scheduleProposalRow(proposal)
                                 }
+                                .onMove(perform: moveScheduleProposals)
                             }
                         }
                     }
@@ -1371,6 +1378,9 @@ struct FocusManagerView: View {
                                 applyAutomaticSchedule()
                             }
                             .disabled(scheduleProposals.isEmpty || hasInvalidAvoidedWindow)
+                        }
+                        ToolbarItem(placement: .bottomBar) {
+                            EditButton()
                         }
                     }
                     .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
@@ -1427,10 +1437,26 @@ struct FocusManagerView: View {
     }
 
     private func refreshAutomaticSchedule() {
+        scheduleReorderMessage = nil
         scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
                                                            maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
                                                            breakMinutes: breakMinutes,
                                                            avoiding: avoidedScheduleRanges)
+    }
+
+    private func moveScheduleProposals(from offsets: IndexSet, to destination: Int) {
+        let previous = scheduleProposals
+        var reordered = scheduleProposals
+        reordered.move(fromOffsets: offsets, toOffset: destination)
+        if let reflowed = viewModel.reflowFocusSchedule(reordered,
+                                                        breakMinutes: breakMinutes,
+                                                        avoiding: avoidedScheduleRanges) {
+            scheduleProposals = reflowed
+            scheduleReorderMessage = nil
+        } else {
+            scheduleProposals = previous
+            scheduleReorderMessage = "Ese orden no cabe en los huecos disponibles."
+        }
     }
 
     private var avoidedScheduleRanges: [Range<Date>] {

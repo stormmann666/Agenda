@@ -74,6 +74,7 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `proposeFocusSchedule` creates a non-destructive day plan from the current time using only focuses with priority 1–5. It gives every eligible focus one session before assigning second sessions, deducts completed and already-scheduled time, preserves existing boxes and multiple configurable avoided time ranges, and supports configurable session duration, breaks, and consecutive-category limits.
   - `applyFocusSchedule` validates the preview again before atomically creating its boxes and focus links, preventing stale proposals from overlapping newer agenda changes.
   - The automatic-plan preview observes focus mutations and recalculates when priorities change; users can also trigger the same local recalculation with “Actualizar propuesta”.
+  - Preview rows can be reordered before confirmation. `reflowFocusSchedule` recalculates their start times in the chosen order while preserving durations, breaks, existing boxes, and avoided windows.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
 ## Testing

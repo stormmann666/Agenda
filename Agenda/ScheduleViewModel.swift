@@ -694,6 +694,52 @@ final class ScheduleViewModel: ObservableObject {
         return proposals
     }
 
+    /// Reassigns start times to an explicitly ordered preview while preserving
+    /// every proposal's focus, category and duration.
+    func reflowFocusSchedule(_ orderedProposals: [FocusScheduleProposal],
+                             breakMinutes: Int = 0,
+                             avoiding avoidedTimeRanges: [Range<Date>] = []) -> [FocusScheduleProposal]? {
+        guard let firstBlock = orderedProposals.map(\.startIndex).min() else { return [] }
+        let breakBlocks = max(0, Int(ceil(Double(breakMinutes) / Double(Self.blockMinutes))))
+        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+        let blockSeconds = Double(Self.blockMinutes * 60)
+        for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
+            let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
+            let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
+            let start = max(0, min(totalBlocks, rawStart))
+            let end = max(0, min(totalBlocks, rawEnd))
+            if start < end { occupied.append(start..<end) }
+        }
+
+        var freeRanges: [Range<Int>] = []
+        var freeCursor = firstBlock
+        for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            guard range.upperBound > firstBlock else { continue }
+            if freeCursor < range.lowerBound {
+                freeRanges.append(freeCursor..<min(range.lowerBound, totalBlocks))
+            }
+            freeCursor = max(freeCursor, range.upperBound)
+        }
+        if freeCursor < totalBlocks { freeRanges.append(freeCursor..<totalBlocks) }
+
+        var result: [FocusScheduleProposal] = []
+        var scheduleCursor = firstBlock
+        for proposal in orderedProposals {
+            guard let range = freeRanges.first(where: {
+                let candidateStart = max($0.lowerBound, scheduleCursor)
+                return candidateStart + proposal.duration <= $0.upperBound
+            }) else { return nil }
+            let start = max(range.lowerBound, scheduleCursor)
+            result.append(FocusScheduleProposal(id: proposal.id,
+                                                focusID: proposal.focusID,
+                                                categoryID: proposal.categoryID,
+                                                startIndex: start,
+                                                duration: proposal.duration))
+            scheduleCursor = start + proposal.duration + breakBlocks
+        }
+        return result
+    }
+
     /// Applies a previously generated plan only if every proposed interval is
     /// still valid. This prevents a stale preview from overwriting newer boxes.
     @discardableResult

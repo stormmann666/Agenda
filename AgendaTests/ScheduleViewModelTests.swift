@@ -149,6 +149,23 @@ final class ScheduleViewModelTests: XCTestCase {
         }
     }
 
+    func testReflowFocusScheduleAppliesUserOrderAndUpdatesTimes() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let first = FocusItem(name: "Primero", expectedMinutes: 30, proposedCategoryID: category.id, priority: 2)
+        let second = FocusItem(name: "Segundo", expectedMinutes: 30, proposedCategoryID: category.id, priority: 1)
+        viewModel.focuses = [first, second]
+        let original = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), maximumSessionMinutes: 30)
+        let reversed = Array(original.reversed())
+
+        let reflowed = viewModel.reflowFocusSchedule(reversed, breakMinutes: 10)
+
+        XCTAssertEqual(reflowed?.map(\.focusID), reversed.map(\.focusID))
+        XCTAssertEqual(reflowed?.map(\.startIndex), [0, 8])
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)
