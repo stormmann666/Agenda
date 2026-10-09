@@ -173,6 +173,26 @@ struct TimelineBlock: Identifiable {
     var id: Int { index }
 }
 
+struct FocusScheduleProposal: Identifiable, Hashable {
+    let id: UUID
+    let focusID: UUID
+    let categoryID: UUID
+    let startIndex: Int
+    let duration: Int
+
+    init(id: UUID = UUID(),
+         focusID: UUID,
+         categoryID: UUID,
+         startIndex: Int,
+         duration: Int) {
+        self.id = id
+        self.focusID = focusID
+        self.categoryID = categoryID
+        self.startIndex = startIndex
+        self.duration = duration
+    }
+}
+
 final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 5
     private let categoryService: TaskCategoryRemoteService
@@ -554,6 +574,108 @@ final class ScheduleViewModel: ObservableObject {
         guard let newTask = addTask(at: startIndex, category: category) else { return nil }
         assignFocus(focus, to: newTask)
         return task(with: newTask.id)
+    }
+
+    /// Builds a non-destructive plan for the pending, estimable focuses.
+    /// Existing boxes are never moved and already scheduled, unfinished focus time
+    /// is deducted so running the planner repeatedly does not duplicate work.
+    func proposeFocusSchedule(from referenceDate: Date = Date(), minimumSessionMinutes: Int = 15) -> [FocusScheduleProposal] {
+        guard let firstBlock = blockIndex(for: referenceDate), firstBlock < totalBlocks else { return [] }
+        let minimumBlocks = max(1, Int(ceil(Double(minimumSessionMinutes) / Double(Self.blockMinutes))))
+        let occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+        var freeRanges: [Range<Int>] = []
+        var cursor = firstBlock
+
+        for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            guard range.upperBound > firstBlock else { continue }
+            if cursor < range.lowerBound {
+                freeRanges.append(cursor..<min(range.lowerBound, totalBlocks))
+            }
+            cursor = max(cursor, range.upperBound)
+            if cursor >= totalBlocks { break }
+        }
+        if cursor < totalBlocks {
+            freeRanges.append(cursor..<totalBlocks)
+        }
+
+        let candidates = focuses.compactMap { focus -> (FocusItem, Int)? in
+            guard !(focus.isCompleted ?? false),
+                  let categoryID = focus.proposedCategoryID,
+                  category(for: categoryID) != nil,
+                  let expected = focus.expectedMinutes,
+                  expected > 0 else { return nil }
+            let scheduledMinutes = tasks
+                .filter { $0.focusID == focus.id && !$0.isCompleted }
+                .reduce(0) { $0 + $1.duration * Self.blockMinutes }
+            let remainingMinutes = expected - (focus.actualMinutes ?? 0) - scheduledMinutes
+            guard remainingMinutes > 0 else { return nil }
+            return (focus, Int(ceil(Double(remainingMinutes) / Double(Self.blockMinutes))))
+        }
+        .sorted { lhs, rhs in
+            if lhs.0.priority != rhs.0.priority { return lhs.0.priority > rhs.0.priority }
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+            return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
+        }
+
+        var proposals: [FocusScheduleProposal] = []
+        var mutableRanges = freeRanges
+        for (focus, requiredBlocks) in candidates {
+            guard let categoryID = focus.proposedCategoryID else { continue }
+            var remaining = requiredBlocks
+            for index in mutableRanges.indices where remaining > 0 {
+                let range = mutableRanges[index]
+                let available = range.count
+                guard available > 0 else { continue }
+                let duration = min(remaining, available)
+                guard duration >= minimumBlocks || remaining < minimumBlocks else { continue }
+                proposals.append(FocusScheduleProposal(focusID: focus.id,
+                                                       categoryID: categoryID,
+                                                       startIndex: range.lowerBound,
+                                                       duration: duration))
+                mutableRanges[index] = (range.lowerBound + duration)..<range.upperBound
+                remaining -= duration
+            }
+        }
+        return proposals
+    }
+
+    /// Applies a previously generated plan only if every proposed interval is
+    /// still valid. This prevents a stale preview from overwriting newer boxes.
+    @discardableResult
+    func applyFocusSchedule(_ proposals: [FocusScheduleProposal]) -> Bool {
+        guard !proposals.isEmpty else { return false }
+        var stagedTasks = tasks
+        var createdByFocus: [UUID: [UUID]] = [:]
+
+        for proposal in proposals.sorted(by: { $0.startIndex < $1.startIndex }) {
+            guard focuses.contains(where: { $0.id == proposal.focusID && !($0.isCompleted ?? false) }),
+                  category(for: proposal.categoryID) != nil,
+                  proposal.duration > 0,
+                  proposal.startIndex >= 0,
+                  proposal.startIndex + proposal.duration <= totalBlocks else { return false }
+            let overlaps = stagedTasks.contains { task in
+                proposal.startIndex < task.startIndex + task.duration &&
+                proposal.startIndex + proposal.duration > task.startIndex
+            }
+            guard !overlaps else { return false }
+            let task = TaskItem(categoryID: proposal.categoryID,
+                                startIndex: proposal.startIndex,
+                                duration: proposal.duration,
+                                focusID: proposal.focusID)
+            stagedTasks.append(task)
+            createdByFocus[proposal.focusID, default: []].append(task.id)
+        }
+
+        mutateTasks { tasks in
+            tasks = stagedTasks.sorted { $0.startIndex < $1.startIndex }
+        }
+        mutateFocuses { focuses in
+            for index in focuses.indices {
+                guard let createdIDs = createdByFocus[focuses[index].id] else { continue }
+                focuses[index].taskIDs.append(contentsOf: createdIDs.filter { !focuses[index].taskIDs.contains($0) })
+            }
+        }
+        return true
     }
 
     func logFocusUsage(_ focus: FocusItem, minutes: Int) {

@@ -26,6 +26,55 @@ final class ScheduleViewModelTests: XCTestCase {
     }
     
     // MARK: - Tests
+
+    func testProposeFocusScheduleUsesPriorityAndSplitsAroundExistingTasks() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let blocker = TaskItem(categoryID: category.id, startIndex: 6, duration: 3)
+        let (viewModel, cleanup) = makeViewModel(tasks: [blocker])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        viewModel.focuses = [
+            FocusItem(name: "Secundario", expectedMinutes: 15, proposedCategoryID: category.id, priority: 2),
+            FocusItem(name: "Prioritario", expectedMinutes: 45, proposedCategoryID: category.id, priority: 5)
+        ]
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0))
+
+        XCTAssertEqual(proposals.map(\.startIndex), [0, 9, 12])
+        XCTAssertEqual(proposals.map(\.duration), [6, 3, 3])
+        XCTAssertEqual(proposals.first?.focusID, viewModel.focuses[1].id)
+        XCTAssertEqual(proposals.last?.focusID, viewModel.focuses[0].id)
+    }
+
+    func testApplyFocusScheduleCreatesLinkedBoxesAndRejectsStalePlan() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let focus = FocusItem(name: "Planificable", expectedMinutes: 30, proposedCategoryID: category.id, priority: 5)
+        viewModel.focuses = [focus]
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0))
+
+        XCTAssertTrue(viewModel.applyFocusSchedule(proposals))
+        XCTAssertEqual(viewModel.tasks.count, 1)
+        XCTAssertEqual(viewModel.tasks.first?.duration, 6)
+        XCTAssertEqual(viewModel.tasks.first?.focusID, focus.id)
+        XCTAssertEqual(viewModel.focus(with: focus.id)?.taskIDs, [viewModel.tasks[0].id])
+        XCTAssertFalse(viewModel.applyFocusSchedule(proposals), "A stale preview must not overlap the boxes it already created")
+    }
+
+    func testProposeFocusScheduleDoesNotDuplicateAlreadyScheduledTime() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let focus = FocusItem(name: "En curso", expectedMinutes: 30, proposedCategoryID: category.id, priority: 5)
+        let scheduled = TaskItem(categoryID: category.id, startIndex: 0, duration: 6, focusID: focus.id)
+        let (viewModel, cleanup) = makeViewModel(tasks: [scheduled])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        viewModel.focuses = [focus]
+
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0)).isEmpty)
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)

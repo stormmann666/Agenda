@@ -1087,6 +1087,8 @@ struct FocusManagerView: View {
     @State private var focusActionMessage: String?
     @State private var recentlyScheduledFocusID: UUID?
     @State private var showingPriorityAdjuster = false
+    @State private var scheduleProposals: [FocusScheduleProposal] = []
+    @State private var showingSchedulePreview = false
 
     var body: some View {
         NavigationStack {
@@ -1109,10 +1111,17 @@ struct FocusManagerView: View {
             .navigationTitle("Focuses")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showingPriorityAdjuster = true
-                    } label: {
-                        Label("Prioridades", systemImage: "slider.horizontal.3")
+                    HStack {
+                        Button {
+                            prepareAutomaticSchedule()
+                        } label: {
+                            Label("Planificar", systemImage: "wand.and.stars")
+                        }
+                        Button {
+                            showingPriorityAdjuster = true
+                        } label: {
+                            Label("Prioridades", systemImage: "slider.horizontal.3")
+                        }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1267,6 +1276,35 @@ struct FocusManagerView: View {
                     FocusPriorityAdjustView(viewModel: viewModel)
                 }
             }
+            .sheet(isPresented: $showingSchedulePreview) {
+                NavigationStack {
+                    List {
+                        Section {
+                            Text("Se respetarán los boxes existentes. Los focuses se ordenan por prioridad y pueden dividirse entre varios huecos.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Section("Propuesta") {
+                            ForEach(scheduleProposals) { proposal in
+                                scheduleProposalRow(proposal)
+                            }
+                        }
+                    }
+                    .navigationTitle("Plan automático")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") {
+                                showingSchedulePreview = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Añadir a la agenda") {
+                                applyAutomaticSchedule()
+                            }
+                        }
+                    }
+                }
+            }
             .alert("Focus", isPresented: Binding(
                 get: { focusActionMessage != nil },
                 set: { newValue in
@@ -1305,6 +1343,44 @@ struct FocusManagerView: View {
                            proposedCategoryID: newFocusProposedCategoryID,
                            priority: newFocusPriority)
         resetFocusForm()
+    }
+
+    private func prepareAutomaticSchedule() {
+        scheduleProposals = viewModel.proposeFocusSchedule()
+        if scheduleProposals.isEmpty {
+            focusActionMessage = "No hay focuses planificables o huecos disponibles. Añade una estimación y un tipo propuesto a los focuses pendientes."
+        } else {
+            showingSchedulePreview = true
+        }
+    }
+
+    private func applyAutomaticSchedule() {
+        if viewModel.applyFocusSchedule(scheduleProposals) {
+            showingSchedulePreview = false
+            scheduleProposals = []
+        } else {
+            showingSchedulePreview = false
+            focusActionMessage = "La agenda ha cambiado. Vuelve a generar la propuesta para evitar solapamientos."
+        }
+    }
+
+    @ViewBuilder
+    private func scheduleProposalRow(_ proposal: FocusScheduleProposal) -> some View {
+        if let focus = viewModel.focus(with: proposal.focusID),
+           let category = viewModel.category(for: proposal.categoryID) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(category.color)
+                    .frame(width: 12, height: 12)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(focus.name)
+                        .font(.headline)
+                    Text("\(viewModel.label(for: proposal.startIndex))–\(viewModel.label(for: proposal.startIndex + proposal.duration)) · \(proposal.duration * ScheduleViewModel.blockMinutes) min")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     @ViewBuilder

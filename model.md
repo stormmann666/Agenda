@@ -71,6 +71,8 @@ All collections are encoded via `JSONEncoder`/`JSONDecoder` and stored inside `U
   - `clearFocus(for:)` removes any associated focus from a task and frees the focus for later use.
   - `setTaskFocusIndeterminate(_:isIndeterminate:)` toggles the “focused pero indefinido” state y, cuando pasa a indeterminado, libera al focus para que otros boxes puedan tomarlo.
   - Focus persistence stays consistent through `mutateTasks` calling `cleanupFocusAssignments()` so any dangling assignments are automatically cleared when tasks disappear.
+  - `proposeFocusSchedule` creates a non-destructive day plan from the current time, ordered by focus priority. It deducts completed and already-scheduled time, preserves existing boxes, and splits focuses across free ranges when needed.
+  - `applyFocusSchedule` validates the preview again before atomically creating its boxes and focus links, preventing stale proposals from overlapping newer agenda changes.
 - **Persistence**: Any mutation routes through `mutateTasks`/`mutateCategories`, which copy the arrays, apply the change, publish via `@Published` and save the updated payload back to `UserDefaults`.
 
 ## Testing
