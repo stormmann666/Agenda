@@ -1308,6 +1308,11 @@ struct FocusManagerView: View {
                             Text("Solo se incluyen focuses con prioridad entre 1 y 5. Los boxes existentes siempre se respetan.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            Button {
+                                refreshAutomaticSchedule()
+                            } label: {
+                                Label("Actualizar propuesta", systemImage: "arrow.clockwise")
+                            }
                         }
                         Section("Propuesta") {
                             if scheduleProposals.isEmpty {
@@ -1339,6 +1344,7 @@ struct FocusManagerView: View {
                     .onChange(of: avoidsTimeRange) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidedStartTime) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidedEndTime) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
                 }
             }
             .alert("Focus", isPresented: Binding(
@@ -1357,6 +1363,7 @@ struct FocusManagerView: View {
             }
             .refreshable {
                 await viewModel.refreshFocusesFromRemote()
+                refreshAutomaticSchedule()
             }
         }
     }

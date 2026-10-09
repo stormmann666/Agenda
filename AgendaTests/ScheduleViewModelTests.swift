@@ -111,6 +111,22 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(Array(proposals.prefix(3)).map(\.categoryID), [categoryA.id, categoryB.id, categoryA.id])
     }
 
+    func testPlannerIncludesFocusAfterPriorityChangesFromZeroToOne() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        var focus = FocusItem(name: "Nueva prioridad", expectedMinutes: 30, proposedCategoryID: category.id, priority: 0)
+        viewModel.focuses = [focus]
+
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0)).isEmpty)
+
+        focus.priority = 1
+        viewModel.updateFocus(focus)
+
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0)).contains { $0.focusID == focus.id })
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)
