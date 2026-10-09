@@ -42,8 +42,7 @@ final class ScheduleViewModelTests: XCTestCase {
 
         XCTAssertEqual(proposals.map(\.startIndex), [0, 9, 12])
         XCTAssertEqual(proposals.map(\.duration), [6, 3, 3])
-        XCTAssertEqual(proposals.first?.focusID, viewModel.focuses[1].id)
-        XCTAssertEqual(proposals.last?.focusID, viewModel.focuses[0].id)
+        XCTAssertEqual(proposals.map(\.focusID), [viewModel.focuses[1].id, viewModel.focuses[0].id, viewModel.focuses[1].id])
     }
 
     func testApplyFocusScheduleCreatesLinkedBoxesAndRejectsStalePlan() {
@@ -92,6 +91,24 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertTrue(proposals.allSatisfy { $0.focusID == prioritized.id })
         XCTAssertTrue(proposals.allSatisfy { $0.duration <= 3 })
         XCTAssertFalse(proposals.contains { $0.startIndex < 12 && $0.startIndex + $0.duration > 6 })
+    }
+
+    func testPlannerLimitsConsecutiveCategoriesAndIncludesPriorityOne() {
+        let categoryA = TaskCategory(name: "A", colorHex: "#3366FF")
+        let categoryB = TaskCategory(name: "B", colorHex: "#FF6633")
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.categories = [categoryA, categoryB]
+        let highA = FocusItem(name: "A alta", expectedMinutes: 90, proposedCategoryID: categoryA.id, priority: 5)
+        let lowB = FocusItem(name: "B prioridad uno", expectedMinutes: 30, proposedCategoryID: categoryB.id, priority: 1)
+        viewModel.focuses = [highA, lowB]
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0),
+                                                       maximumSessionMinutes: 30,
+                                                       maximumConsecutiveSameCategory: 1)
+
+        XCTAssertTrue(proposals.contains { $0.focusID == lowB.id })
+        XCTAssertEqual(Array(proposals.prefix(3)).map(\.categoryID), [categoryA.id, categoryB.id, categoryA.id])
     }
 
     /*

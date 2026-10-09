@@ -582,6 +582,7 @@ final class ScheduleViewModel: ObservableObject {
     func proposeFocusSchedule(from referenceDate: Date = Date(),
                               minimumSessionMinutes: Int = 15,
                               maximumSessionMinutes: Int = 30,
+                              maximumConsecutiveSameCategory: Int = 2,
                               avoiding avoidedTimeRange: Range<Date>? = nil) -> [FocusScheduleProposal] {
         guard let firstBlock = blockIndex(for: referenceDate), firstBlock < totalBlocks else { return [] }
         let minimumBlocks = max(1, Int(ceil(Double(minimumSessionMinutes) / Double(Self.blockMinutes))))
@@ -612,7 +613,7 @@ final class ScheduleViewModel: ObservableObject {
             freeRanges.append(cursor..<totalBlocks)
         }
 
-        let candidates = focuses.compactMap { focus -> (FocusItem, Int)? in
+        var candidates = focuses.compactMap { focus -> (focus: FocusItem, remaining: Int)? in
             guard !(focus.isCompleted ?? false),
                   focus.priority > 0,
                   let categoryID = focus.proposedCategoryID,
@@ -632,23 +633,57 @@ final class ScheduleViewModel: ObservableObject {
             return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
         }
 
+        // Build sessions in rounds. Every eligible focus receives one session
+        // before any focus receives its second, so priority 1 work is not starved
+        // by a long, higher-priority focus.
+        var pendingSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
+        while candidates.contains(where: { $0.remaining > 0 }) {
+            for index in candidates.indices where candidates[index].remaining > 0 {
+                guard let categoryID = candidates[index].focus.proposedCategoryID else { continue }
+                let duration = min(candidates[index].remaining, maximumBlocks)
+                pendingSessions.append((candidates[index].focus.id, categoryID, duration))
+                candidates[index].remaining -= duration
+            }
+        }
+
+        // Reorder only when the configured category streak is reached. If no
+        // alternative category exists, keep planning instead of leaving gaps.
+        let consecutiveLimit = max(1, maximumConsecutiveSameCategory)
+        var orderedSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
+        var lastCategoryID: UUID?
+        var consecutiveCount = 0
+        while !pendingSessions.isEmpty {
+            var selectedIndex = 0
+            if let lastCategoryID,
+               consecutiveCount >= consecutiveLimit,
+               let alternativeIndex = pendingSessions.firstIndex(where: { $0.categoryID != lastCategoryID }) {
+                selectedIndex = alternativeIndex
+            }
+            let session = pendingSessions.remove(at: selectedIndex)
+            if session.categoryID == lastCategoryID {
+                consecutiveCount += 1
+            } else {
+                lastCategoryID = session.categoryID
+                consecutiveCount = 1
+            }
+            orderedSessions.append(session)
+        }
+
         var proposals: [FocusScheduleProposal] = []
         var mutableRanges = freeRanges
-        for (focus, requiredBlocks) in candidates {
-            guard let categoryID = focus.proposedCategoryID else { continue }
-            var remaining = requiredBlocks
+        for session in orderedSessions {
+            var remaining = session.duration
             for index in mutableRanges.indices where remaining > 0 {
                 var range = mutableRanges[index]
-                while remaining > 0 && !range.isEmpty {
-                    let duration = min(remaining, min(range.count, maximumBlocks))
-                    guard duration >= minimumBlocks || remaining < minimumBlocks else { break }
-                    proposals.append(FocusScheduleProposal(focusID: focus.id,
-                                                           categoryID: categoryID,
-                                                           startIndex: range.lowerBound,
-                                                           duration: duration))
-                    range = (range.lowerBound + duration)..<range.upperBound
-                    remaining -= duration
-                }
+                let duration = min(remaining, range.count)
+                guard duration > 0,
+                      duration >= minimumBlocks || remaining < minimumBlocks else { continue }
+                proposals.append(FocusScheduleProposal(focusID: session.focusID,
+                                                       categoryID: session.categoryID,
+                                                       startIndex: range.lowerBound,
+                                                       duration: duration))
+                range = (range.lowerBound + duration)..<range.upperBound
+                remaining -= duration
                 mutableRanges[index] = range
             }
         }

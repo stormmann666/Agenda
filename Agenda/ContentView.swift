@@ -1093,6 +1093,7 @@ struct FocusManagerView: View {
     @State private var avoidedStartTime = Calendar.current.date(bySettingHour: 13, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var avoidedEndTime = Calendar.current.date(bySettingHour: 14, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var focusSessionMinutes = 30
+    @State private var maximumConsecutiveFocusTypes = 2
 
     var body: some View {
         NavigationStack {
@@ -1289,6 +1290,11 @@ struct FocusManagerView: View {
                                     Text("\(minutes) min").tag(minutes)
                                 }
                             }
+                            Picker("Máximo del mismo tipo seguidos", selection: $maximumConsecutiveFocusTypes) {
+                                ForEach(1...5, id: \.self) { count in
+                                    Text("\(count)").tag(count)
+                                }
+                            }
                             Toggle("Evitar un horario", isOn: $avoidsTimeRange)
                             if avoidsTimeRange {
                                 DatePicker("Desde", selection: $avoidedStartTime, displayedComponents: .hourAndMinute)
@@ -1329,6 +1335,7 @@ struct FocusManagerView: View {
                         }
                     }
                     .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidsTimeRange) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidedStartTime) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidedEndTime) { _ in refreshAutomaticSchedule() }
@@ -1381,6 +1388,7 @@ struct FocusManagerView: View {
 
     private func refreshAutomaticSchedule() {
         scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
+                                                           maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
                                                            avoiding: avoidedScheduleRange)
     }
 
