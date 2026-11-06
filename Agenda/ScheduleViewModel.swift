@@ -183,6 +183,9 @@ final class ScheduleViewModel: ObservableObject {
             updateFocusServiceResolver()
         }
     }
+    @Published private(set) var categoryRefreshError: String?
+    private var isRefreshingCategories = false
+    private var isRefreshingRemote = false
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
@@ -242,19 +245,6 @@ final class ScheduleViewModel: ObservableObject {
 
         categories = loadCategories()
         updateFocusServiceResolver()
-        Task { [weak self] in
-            do {
-                guard let self else { return }
-                let remoteCategories = try await self.categoryService.importCategories()
-                await MainActor.run {
-                    self.categories = remoteCategories
-                }
-            } catch {
-                #if DEBUG
-                print("[Categories] Remote fetch failed: \(error)")
-                #endif
-            }
-        }
         //focuses = loadCachedFocuses()
         var loadedTasks = loadTasks()
         var loadedLogs = loadDayLogs()
@@ -291,9 +281,6 @@ final class ScheduleViewModel: ObservableObject {
         }
         dayLogs = loadedLogs
         cleanupFocusAssignments()
-        Task { [weak self] in
-            await self?.refreshFocusesFromRemote()
-        }
     }
 
     var totalBlocks: Int {
@@ -777,7 +764,7 @@ final class ScheduleViewModel: ObservableObject {
         else {
             return Self.defaultCategories
         }
-        return decoded.isEmpty ? Self.defaultCategories : decoded
+        return decoded
     }
 
     private func loadTasks() -> [TaskItem] {
@@ -892,6 +879,32 @@ final class ScheduleViewModel: ObservableObject {
                 #endif
             }
         }
+    }
+
+    @MainActor
+    func refreshCategoriesFromRemote() async {
+        guard !isRefreshingCategories else { return }
+        isRefreshingCategories = true
+        defer { isRefreshingCategories = false }
+        do {
+            let remoteCategories = try await categoryService.importCategories()
+            // The remote snapshot is authoritative, including deletions and an empty table.
+            categories = remoteCategories
+            saveCategories()
+            categoryRefreshError = nil
+        } catch {
+            categoryRefreshError = "No se pudieron actualizar los tipos. \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func refreshFromRemote() async {
+        guard !isRefreshingRemote else { return }
+        isRefreshingRemote = true
+        defer { isRefreshingRemote = false }
+        // Focuses resolve their type names against the latest category list.
+        await refreshCategoriesFromRemote()
+        await refreshFocusesFromRemote()
     }
 
     @MainActor

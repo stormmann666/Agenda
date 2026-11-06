@@ -3,6 +3,51 @@ import XCTest
 
 final class ScheduleViewModelTests: XCTestCase {
     
+    @MainActor
+    func testCategoryRefreshReplacesSnapshotAndPersistsEmptyTable() async throws {
+        let suite = "CategoryRefresh-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = CategoryServiceStub()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        let original = TaskCategory(name: "Original", colorHex: "#ffffff")
+        let removed = TaskCategory(name: "Removed", colorHex: "#000000")
+        model.categories = [original, removed]
+        var edited = original
+        edited.name = "Edited"
+        edited.colorHex = "#123456"
+        service.categories = [edited]
+
+        await model.refreshCategoriesFromRemote()
+        XCTAssertEqual(model.categories, [edited])
+        let cached = try XCTUnwrap(defaults.data(forKey: "agenda.categories.storage"))
+        XCTAssertEqual(try JSONDecoder().decode([TaskCategory].self, from: cached), [edited])
+
+        service.categories = []
+        await model.refreshCategoriesFromRemote()
+        XCTAssertTrue(model.categories.isEmpty)
+        let reloaded = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        XCTAssertTrue(reloaded.categories.isEmpty, "Deleted types must not reappear as defaults")
+    }
+
+    @MainActor
+    func testFailedCategoryRefreshKeepsLastSuccessfulSnapshot() async {
+        let suite = "CategoryRefresh-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = CategoryServiceStub()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        service.categories = [TaskCategory(name: "Saved", colorHex: "#123456")]
+        await model.refreshCategoriesFromRemote()
+        service.shouldFail = true
+        await model.refreshCategoriesFromRemote()
+        XCTAssertEqual(model.categories, service.categories)
+        XCTAssertNotNil(model.categoryRefreshError)
+        service.shouldFail = false
+        await model.refreshCategoriesFromRemote()
+        XCTAssertNil(model.categoryRefreshError)
+    }
+
     // MARK: - Helpers
     
     private func makeViewModel(tasks: [TaskItem]) -> (ScheduleViewModel, () -> Void) {
@@ -150,4 +195,18 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.focus(with: focus.id)?.actualMinutes, expectedMinutes)
     }
      }*/
+}
+
+private final class CategoryServiceStub: TaskCategoryRemoteService {
+    var categories: [TaskCategory] = []
+    var shouldFail = false
+
+    func importCategories() async throws -> [TaskCategory] {
+        if shouldFail { throw URLError(.notConnectedToInternet) }
+        return categories
+    }
+
+    func createCategory(_ category: TaskCategory) async throws {}
+    func updateCategory(_ category: TaskCategory) async throws {}
+    func deleteCategory(_ categoryID: UUID) async throws {}
 }

@@ -10,6 +10,7 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var viewModel = ScheduleViewModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -33,6 +34,11 @@ struct ContentView: View {
                 .tabItem {
                     Label("OneThing", systemImage: "lightbulb.max")
                 }
+        }
+        .task(id: scenePhase) {
+            if scenePhase == .active {
+                await viewModel.refreshFromRemote()
+            }
         }
     }
 }
@@ -939,10 +945,21 @@ struct CategoryManagerView: View {
                     .padding(.vertical, 6)
                 }
                 .onDelete { indexSet in
-                    for index in indexSet {
-                        let category = viewModel.categories[index]
+                    let removed = indexSet.map { viewModel.categories[$0] }
+                    for category in removed {
                         viewModel.deleteCategory(category)
                     }
+                }
+            }
+            .refreshable {
+                await viewModel.refreshFromRemote()
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let error = viewModel.categoryRefreshError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding()
                 }
             }
             .navigationTitle("Tipos de tarea")
@@ -955,6 +972,9 @@ struct CategoryManagerView: View {
                     }
                 }
             }
+        }
+        .task {
+            await viewModel.refreshFromRemote()
         }
         .sheet(isPresented: $showingAddCategory) {
             AddCategorySheet { name, color in
@@ -1282,7 +1302,7 @@ struct FocusManagerView: View {
                 Text(focusActionMessage ?? "")
             }
             .refreshable {
-                await viewModel.refreshFocusesFromRemote()
+                await viewModel.refreshFromRemote()
             }
         }
     }
