@@ -41,7 +41,10 @@ final class SupabaseFocusService: FocusRemoteService {
     private var categoryResolver: ((String) -> UUID?)?
     private var categoryNameResolver: ((UUID) -> String?)?
 
-    private init() {
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
         #if canImport(Supabase)
         client = SupabaseClient(supabaseURL: projectURL, supabaseKey: apiKey)
         #endif
@@ -116,7 +119,7 @@ final class SupabaseFocusService: FocusRemoteService {
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.addValue(apiKey, forHTTPHeaderField: "apikey")
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             let snippet = String(data: data, encoding: .utf8) ?? "<sin cuerpo>"
@@ -125,6 +128,11 @@ final class SupabaseFocusService: FocusRemoteService {
         let decoder = JSONDecoder()
         return try decoder.decode([SupabaseFocusRow].self, from: data)
         #endif
+    }
+
+    func canonicalFocusID(for id: UUID) -> UUID {
+        // The UUID must survive UUID -> Supabase Int64 -> UUID unchanged.
+        uuid(from: numericID(from: id))
     }
 
     private func numericID(for focus: FocusItem) -> Int64 {
@@ -184,7 +192,7 @@ final class SupabaseFocusService: FocusRemoteService {
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             let snippet = String(data: data, encoding: .utf8) ?? "<sin cuerpo>"

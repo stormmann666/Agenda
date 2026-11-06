@@ -1332,6 +1332,7 @@ struct FocusManagerView: View {
     }
 
     private func saveFocus() {
+        guard showingAddFocus, canSaveFocus else { return }
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
         let minutesInput = newFocusHours.trimmingCharacters(in: .whitespacesAndNewlines)
         let minutes = estimationIndeterminate ? nil : max(0, Int(minutesInput) ?? 0)

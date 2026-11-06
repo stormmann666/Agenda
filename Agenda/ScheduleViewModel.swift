@@ -20,9 +20,11 @@ protocol FocusRemoteService {
     func updateFocus(_ focus: FocusItem) async throws
     func deleteFocus(_ focusID: UUID) async throws
     func updateCategoryMappings(_ categories: [TaskCategory])
+    func canonicalFocusID(for id: UUID) -> UUID
 }
 
 extension FocusRemoteService {
+    func canonicalFocusID(for id: UUID) -> UUID { id }
     func updateCategoryMappings(_ categories: [TaskCategory]) { }
 }
 
@@ -477,7 +479,8 @@ final class ScheduleViewModel: ObservableObject {
                   actualMinutes: Int? = nil,
                   proposedCategoryID: UUID? = nil,
                   priority: Int = 0) -> FocusItem {
-        let newFocus = FocusItem(name: name.isEmpty ? "Nuevo focus" : name,
+        let newFocus = FocusItem(id: focusService.canonicalFocusID(for: UUID()),
+                                 name: name.isEmpty ? "Nuevo focus" : name,
                                  expectedMinutes: expectedMinutes,
                                  actualMinutes: actualMinutes,
                                  proposedCategoryID: proposedCategoryID,
@@ -914,13 +917,55 @@ final class ScheduleViewModel: ObservableObject {
     func refreshFocusesFromRemote() async {
         do {
             let remoteFocuses = try await focusService.importFocuses()
-            var merged = focuses
-            for focus in remoteFocuses {
+            var merged: [FocusItem] = []
+            var aliases: [UUID: UUID] = [:]
+            for local in focuses {
+                let canonicalID = focusService.canonicalFocusID(for: local.id)
+                if canonicalID != local.id { aliases[local.id] = canonicalID }
+                var normalized = FocusItem(id: canonicalID,
+                                           name: local.name,
+                                           expectedMinutes: local.expectedMinutes,
+                                           actualMinutes: local.actualMinutes,
+                                           isCompleted: local.isCompleted,
+                                           taskIDs: local.taskIDs,
+                                           proposedCategoryID: local.proposedCategoryID,
+                                           priority: local.priority)
+                if let index = merged.firstIndex(where: { $0.id == canonicalID }) {
+                    let existing = merged[index]
+                    normalized.taskIDs = existing.taskIDs + normalized.taskIDs.filter { !existing.taskIDs.contains($0) }
+                    normalized.isCompleted = (existing.isCompleted == true || normalized.isCompleted == true)
+                        ? true : (existing.isCompleted ?? normalized.isCompleted)
+                    merged[index] = normalized
+                } else {
+                    merged.append(normalized)
+                }
+            }
+            for var focus in remoteFocuses {
                 if let index = merged.firstIndex(where: { $0.id == focus.id }) {
+                    // Supabase does not store these local scheduling fields.
+                    focus.taskIDs = merged[index].taskIDs
+                    focus.isCompleted = merged[index].isCompleted
                     merged[index] = focus
                 } else {
                     merged.append(focus)
                 }
+            }
+            if !aliases.isEmpty {
+                tasks = tasks.map { task in
+                    var updated = task
+                    if let id = task.focusID, let canonicalID = aliases[id] { updated.focusID = canonicalID }
+                    return updated
+                }
+                saveTasks()
+                dayLogs = dayLogs.map { log in
+                    let updatedTasks = log.tasks.map { task in
+                        var updated = task
+                        if let id = task.focusID, let canonicalID = aliases[id] { updated.focusID = canonicalID }
+                        return updated
+                    }
+                    return ScheduleDayLog(id: log.id, date: log.date, tasks: updatedTasks)
+                }
+                saveDayLogs()
             }
             applyFocusChanges(merged, shouldSyncRemote: false)
             cleanupFocusAssignments()

@@ -186,6 +186,89 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(CategoryURLProtocol.lastRequest?.httpMethod, "DELETE")
     }
 
+    @MainActor
+    func testNewSupabaseFocusRemainsSingleAfterRepeatedRefreshes() async throws {
+        let suite = "FocusIdentity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FocusIdentityURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        FocusIdentityURLProtocol.rows = []
+        FocusIdentityURLProtocol.createCount = 0
+        let created = expectation(description: "Focus inserted once")
+        FocusIdentityURLProtocol.didCreate = { created.fulfill() }
+        defer { FocusIdentityURLProtocol.didCreate = nil }
+        let service = SupabaseFocusService(session: session)
+        let model = ScheduleViewModel(defaults: defaults, focusService: service, categoryService: CategoryServiceStub())
+        let added = model.addFocus(name: "Single focus", expectedMinutes: 30, priority: 3)
+        await fulfillment(of: [created], timeout: 3)
+
+        await model.refreshFocusesFromRemote()
+        await model.refreshFocusesFromRemote()
+
+        XCTAssertEqual(FocusIdentityURLProtocol.createCount, 1)
+        XCTAssertEqual(model.focuses.count, 1)
+        XCTAssertEqual(model.focuses.first?.id, added.id)
+        XCTAssertEqual(model.focuses.first?.name, "Single focus")
+        XCTAssertEqual(model.focuses.first?.priority, 3)
+    }
+
+    @MainActor
+    func testRefreshReconcilesLegacyDuplicateAndPreservesTaskLinks() async {
+        let suite = "FocusIdentity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FocusIdentityURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let service = SupabaseFocusService(session: session)
+        let model = ScheduleViewModel(defaults: defaults, focusService: service, categoryService: CategoryServiceStub())
+        let legacyID = UUID(uuidString: "00000000-0000-0007-8000-000000000001")!
+        let canonicalID = service.canonicalFocusID(for: legacyID)
+        let task = TaskItem(categoryID: UUID(), startIndex: 0, duration: 1, focusID: legacyID)
+        let anotherTask = TaskItem(categoryID: UUID(), startIndex: 1, duration: 1, focusID: canonicalID)
+        model.tasks = [task, anotherTask]
+        model.dayLogs = [ScheduleDayLog(date: Date(), tasks: [task])]
+        model.focuses = [FocusItem(id: legacyID, name: "Original", isCompleted: true, taskIDs: [task.id]),
+                         FocusItem(id: canonicalID, name: "Original", taskIDs: [anotherTask.id])]
+        FocusIdentityURLProtocol.rows = [["id": 7, "Descripcion": "Remote edit", "Prioridad": 2]]
+        FocusIdentityURLProtocol.createCount = 0
+
+        await model.refreshFocusesFromRemote()
+
+        XCTAssertEqual(model.focuses.count, 1)
+        XCTAssertEqual(model.focuses.first?.id, canonicalID)
+        XCTAssertEqual(model.focuses.first?.name, "Remote edit")
+        XCTAssertEqual(Set(model.focuses.first?.taskIDs ?? []), Set([task.id, anotherTask.id]))
+        XCTAssertEqual(model.focuses.first?.isCompleted, true)
+        XCTAssertTrue(model.tasks.allSatisfy { $0.focusID == canonicalID })
+        XCTAssertEqual(model.dayLogs.first?.tasks.first?.focusID, canonicalID)
+        XCTAssertEqual(FocusIdentityURLProtocol.createCount, 0)
+    }
+
+    @MainActor
+    func testDifferentFocusesWithSameNameAreNotMerged() async {
+        let suite = "FocusIdentity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FocusIdentityURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let service = SupabaseFocusService(session: session)
+        let model = ScheduleViewModel(defaults: defaults, focusService: service, categoryService: CategoryServiceStub())
+        FocusIdentityURLProtocol.rows = [["id": 7, "Descripcion": "Same name"], ["id": -7, "Descripcion": "Same name"]]
+        await model.refreshFocusesFromRemote()
+        XCTAssertEqual(model.focuses.count, 2)
+        XCTAssertNotEqual(model.focuses.first?.id, model.focuses.last?.id)
+        for focus in model.focuses {
+            XCTAssertEqual(service.canonicalFocusID(for: focus.id), focus.id)
+        }
+    }
+
     // MARK: - Helpers
     
     private func makeViewModel(tasks: [TaskItem]) -> (ScheduleViewModel, () -> Void) {
@@ -391,4 +474,38 @@ private final class PendingCategoryMutationService: TaskCategoryRemoteService {
     func deleteCategory(_ categoryID: UUID) async throws {
         try await withCheckedThrowingContinuation { pendingDeletion = $0 }
     }
+}
+
+private final class FocusIdentityURLProtocol: URLProtocol {
+    static var rows: [[String: Any]] = []
+    static var createCount = 0
+    static var didCreate: (() -> Void)?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        if request.httpMethod == "POST" {
+            var body = request.httpBody ?? Data()
+            if body.isEmpty, let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    body.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            if let row = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                Self.rows.append(row)
+            }
+            Self.createCount += 1
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: request.httpMethod == "GET" ? Self.rows : [])) ?? Data()
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+        if request.httpMethod == "POST" { Self.didCreate?() }
+    }
+    override func stopLoading() {}
 }
