@@ -48,6 +48,144 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertNil(model.categoryRefreshError)
     }
 
+    @MainActor
+    func testLatestCategoryRefreshWinsWhenRequestsOverlap() async {
+        let suite = "CategoryRefresh-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = PendingCategoryService()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        let first = Task { await model.refreshCategoriesFromRemote() }
+        while service.requests.count < 1 { await Task.yield() }
+        let second = Task { await model.refreshCategoriesFromRemote() }
+        while service.requests.count < 2 { await Task.yield() }
+        let latest = TaskCategory(name: "Latest", colorHex: "#123456")
+        service.requests[1].resume(returning: [latest])
+        await second.value
+        service.requests[0].resume(returning: [TaskCategory(name: "Stale", colorHex: "#000000")])
+        await first.value
+        XCTAssertEqual(model.categories, [latest])
+        XCTAssertFalse(model.isRefreshingCategories)
+        XCTAssertNotNil(model.categoriesLastRefreshedAt)
+    }
+
+    func testCategoryServiceFetchesEditsAndDeletionsWithoutCache() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CategoryURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let service = SupabaseTaskCategoryService(session: session)
+        let id = UUID()
+        CategoryURLProtocol.responseData = Data("[{\"id\":\"\(id.uuidString)\",\"name\":\"Before\",\"colorHex\":\"#ffffff\"}]".utf8)
+        let before = try await service.importCategories()
+        XCTAssertEqual(before.first?.name, "Before")
+        CategoryURLProtocol.responseData = Data("[{\"id\":\"\(id.uuidString)\",\"name\":\"After\",\"colorHex\":\"#123456\"}]".utf8)
+        let after = try await service.importCategories()
+        XCTAssertEqual(after.first?.id, id)
+        XCTAssertEqual(after.first?.name, "After")
+        XCTAssertEqual(after.first?.colorHex, "#123456")
+        CategoryURLProtocol.responseData = Data("[]".utf8)
+        let deleted = try await service.importCategories()
+        XCTAssertTrue(deleted.isEmpty)
+        XCTAssertEqual(CategoryURLProtocol.lastRequest?.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+        XCTAssertEqual(CategoryURLProtocol.lastRequest?.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
+    }
+
+    @MainActor
+    func testRefreshWaitsForConfirmedDeletionAndDoesNotRestoreDeletedType() async {
+        let suite = "CategoryDeletion-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = PendingCategoryMutationService()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        let category = TaskCategory(name: "Delete", colorHex: "#123456")
+        let task = TaskItem(categoryID: category.id, startIndex: 0, duration: 1)
+        service.categories = [category]
+        model.categories = [category]
+        model.tasks = [task]
+
+        let deletion = model.deleteCategory(category)
+        while service.pendingDeletion == nil { await Task.yield() }
+        XCTAssertEqual(model.categories, [category], "Keep the type until the server confirms deletion")
+        XCTAssertEqual(model.tasks, [task])
+        let refresh = Task { await model.refreshCategoriesFromRemote() }
+        await Task.yield()
+        XCTAssertEqual(service.importCount, 0, "Do not read a stale snapshot during deletion")
+        service.categories = []
+        service.pendingDeletion?.resume()
+        await deletion.value
+        await refresh.value
+        XCTAssertTrue(model.categories.isEmpty)
+        XCTAssertTrue(model.tasks.isEmpty)
+        XCTAssertNil(model.categoryMutationError)
+    }
+
+    @MainActor
+    func testFailedDeletionPreservesTypeAndTasksAndShowsError() async {
+        let suite = "CategoryDeletion-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = PendingCategoryMutationService()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        let category = TaskCategory(name: "Keep", colorHex: "#123456")
+        let task = TaskItem(categoryID: category.id, startIndex: 0, duration: 1)
+        service.categories = [category]
+        model.categories = [category]
+        model.tasks = [task]
+        let deletion = model.deleteCategory(category)
+        while service.pendingDeletion == nil { await Task.yield() }
+        service.pendingDeletion?.resume(throwing: URLError(.notConnectedToInternet))
+        await deletion.value
+        await model.refreshCategoriesFromRemote()
+        XCTAssertEqual(model.categories, [category])
+        XCTAssertEqual(model.tasks, [task])
+        XCTAssertNotNil(model.categoryMutationError)
+    }
+
+    @MainActor
+    func testCategoryEditsAreWrittenBeforeRefresh() async {
+        let suite = "CategoryEdit-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = PendingCategoryMutationService()
+        let model = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: service)
+        var category = TaskCategory(name: "Before", colorHex: "#ffffff")
+        service.categories = [category]
+        model.categories = [category]
+        category.name = "After"
+        category.colorHex = "#123456"
+        model.updateCategory(category)
+        await model.refreshCategoriesFromRemote()
+        XCTAssertEqual(service.categories, [category])
+        XCTAssertEqual(model.categories, [category])
+    }
+
+    func testCategoryWritesRejectSuccessfulHTTPResponseWithNoAffectedRows() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CategoryURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let service = SupabaseTaskCategoryService(session: session)
+        let category = TaskCategory(name: "Write", colorHex: "#123456")
+        CategoryURLProtocol.responseData = Data("[]".utf8)
+        do {
+            try await service.deleteCategory(category.id)
+            XCTFail("An HTTP success without a deleted row must not count as deletion")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Supabase no confirmó"))
+        }
+        do {
+            try await service.updateCategory(category)
+            XCTFail("An HTTP success without an updated row must not count as an edit")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Supabase no confirmó"))
+        }
+        XCTAssertEqual(CategoryURLProtocol.lastRequest?.value(forHTTPHeaderField: "Prefer"), "return=representation")
+        CategoryURLProtocol.responseData = Data("[{\"id\":\"\(category.id.uuidString)\"}]".utf8)
+        try await service.deleteCategory(category.id)
+        XCTAssertEqual(CategoryURLProtocol.lastRequest?.httpMethod, "DELETE")
+    }
+
     // MARK: - Helpers
     
     private func makeViewModel(tasks: [TaskItem]) -> (ScheduleViewModel, () -> Void) {
@@ -209,4 +347,48 @@ private final class CategoryServiceStub: TaskCategoryRemoteService {
     func createCategory(_ category: TaskCategory) async throws {}
     func updateCategory(_ category: TaskCategory) async throws {}
     func deleteCategory(_ categoryID: UUID) async throws {}
+}
+
+private final class PendingCategoryService: TaskCategoryRemoteService {
+    var requests: [CheckedContinuation<[TaskCategory], Error>] = []
+    func importCategories() async throws -> [TaskCategory] {
+        try await withCheckedThrowingContinuation { requests.append($0) }
+    }
+    func createCategory(_ category: TaskCategory) async throws {}
+    func updateCategory(_ category: TaskCategory) async throws {}
+    func deleteCategory(_ categoryID: UUID) async throws {}
+}
+
+private final class CategoryURLProtocol: URLProtocol {
+    static var responseData = Data()
+    static var lastRequest: URLRequest?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lastRequest = request
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.responseData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class PendingCategoryMutationService: TaskCategoryRemoteService {
+    var categories: [TaskCategory] = []
+    var pendingDeletion: CheckedContinuation<Void, Error>?
+    var importCount = 0
+    func importCategories() async throws -> [TaskCategory] {
+        importCount += 1
+        return categories
+    }
+    func createCategory(_ category: TaskCategory) async throws { categories.append(category) }
+    func updateCategory(_ category: TaskCategory) async throws {
+        if let index = categories.firstIndex(where: { $0.id == category.id }) {
+            categories[index] = category
+        }
+    }
+    func deleteCategory(_ categoryID: UUID) async throws {
+        try await withCheckedThrowingContinuation { pendingDeletion = $0 }
+    }
 }

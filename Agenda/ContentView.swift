@@ -925,16 +925,24 @@ struct CategoryManagerView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach($viewModel.categories) { $category in
+                ForEach(viewModel.categories) { category in
                     HStack(spacing: 12) {
-                        TextField("Nombre", text: $category.name)
+                        TextField("Nombre", text: Binding(
+                            get: { viewModel.category(for: category.id)?.name ?? category.name },
+                            set: { name in
+                                guard var updated = viewModel.category(for: category.id) else { return }
+                                updated.name = name
+                                viewModel.updateCategory(updated)
+                            }))
                             .font(.headline)
                         Spacer()
                         ColorPicker("",
                                     selection: Binding<Color>(
-                                        get: { Color(hex: category.colorHex) },
+                                        get: { viewModel.category(for: category.id)?.color ?? category.color },
                                         set: { newColor in
-                                            category.colorHex = newColor.hexString
+                                            guard var updated = viewModel.category(for: category.id) else { return }
+                                            updated.colorHex = newColor.hexString
+                                            viewModel.updateCategory(updated)
                                         })
                         )
                         .labelsHidden()
@@ -952,14 +960,21 @@ struct CategoryManagerView: View {
                 }
             }
             .refreshable {
-                await viewModel.refreshFromRemote()
+                await viewModel.refreshCategoriesFromRemote()
             }
             .safeAreaInset(edge: .bottom) {
-                if let error = viewModel.categoryRefreshError {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .padding()
+                VStack(spacing: 4) {
+                    if let date = viewModel.categoriesLastRefreshedAt {
+                        Text("Actualizado a las \(date.formatted(date: .omitted, time: .standard)) · \(viewModel.categories.count) tipos")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = viewModel.categoryMutationError ?? viewModel.categoryRefreshError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .padding()
+                    }
                 }
             }
             .navigationTitle("Tipos de tarea")
@@ -974,7 +989,7 @@ struct CategoryManagerView: View {
             }
         }
         .task {
-            await viewModel.refreshFromRemote()
+            await viewModel.refreshCategoriesFromRemote()
         }
         .sheet(isPresented: $showingAddCategory) {
             AddCategorySheet { name, color in

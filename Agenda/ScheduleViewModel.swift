@@ -184,8 +184,11 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
     @Published private(set) var categoryRefreshError: String?
-    private var isRefreshingCategories = false
-    private var isRefreshingRemote = false
+    @Published private(set) var categoryMutationError: String?
+    private var categoryMutationTask: Task<Void, Never>?
+    @Published private(set) var isRefreshingCategories = false
+    @Published private(set) var categoriesLastRefreshedAt: Date?
+    private var categoryRefreshVersion = 0
     @Published var tasks: [TaskItem]
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
@@ -598,6 +601,7 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    @MainActor
     func updateCategory(_ category: TaskCategory) {
         guard let index = categories.firstIndex(where: { $0.id == category.id }) else { return }
         mutateCategories { categories in
@@ -606,6 +610,7 @@ final class ScheduleViewModel: ObservableObject {
         syncCategoryUpdate(category)
     }
 
+    @MainActor
     func addCategory() {
         let color = Color.randomAccent().hexString
         let newCategory = TaskCategory(name: "Nueva tarea", colorHex: color)
@@ -615,6 +620,7 @@ final class ScheduleViewModel: ObservableObject {
         syncCategoryCreation(newCategory)
     }
 
+    @MainActor
     func addCategory(name: String, color: Color) {
         let newCategory = TaskCategory(name: name.isEmpty ? "Nueva tarea" : name,
                                        colorHex: color.hexString)
@@ -624,14 +630,18 @@ final class ScheduleViewModel: ObservableObject {
         syncCategoryCreation(newCategory)
     }
 
-    func deleteCategory(_ category: TaskCategory) {
-        mutateCategories { categories in
-            categories.removeAll { $0.id == category.id }
+    @MainActor
+    @discardableResult
+    func deleteCategory(_ category: TaskCategory) -> Task<Void, Never> {
+        enqueueCategoryMutation {
+            try await self.categoryService.deleteCategory(category.id)
+            self.mutateCategories { categories in
+                categories.removeAll { $0.id == category.id }
+            }
+            self.mutateTasks { tasks in
+                tasks.removeAll { $0.categoryID == category.id }
+            }
         }
-        mutateTasks { tasks in
-            tasks.removeAll { $0.categoryID == category.id }
-        }
-        syncCategoryDeletion(category)
     }
 
     func clearAllTasks() {
@@ -796,48 +806,37 @@ final class ScheduleViewModel: ObservableObject {
         defaults.set(data, forKey: categoriesKey)
     }
 
+    @MainActor
+    @discardableResult
+    private func enqueueCategoryMutation(_ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Never> {
+        // A refresh must not restore a row while its deletion/update is still pending.
+        categoryRefreshVersion += 1
+        isRefreshingCategories = false
+        let previous = categoryMutationTask
+        let task = Task { @MainActor in
+            await previous?.value
+            do {
+                try await operation()
+                self.categoryMutationError = nil
+            } catch {
+                self.categoryMutationError = "No se pudo guardar el cambio del tipo. \(error.localizedDescription)"
+            }
+        }
+        categoryMutationTask = task
+        return task
+    }
+
+    @MainActor
     private func syncCategoryCreation(_ category: TaskCategory) {
-        Task {
-            do {
-                try await categoryService.createCategory(category)
-#if DEBUG
-                print("[Categories] Created remote category \(category.id) (\(category.name))")
-#endif
-            } catch {
-                #if DEBUG
-                print("[Categories] Failed to create \(category.id): \(error)")
-                #endif
-            }
+        enqueueCategoryMutation {
+            try await self.categoryService.createCategory(category)
         }
     }
 
-    private func syncCategoryDeletion(_ category: TaskCategory) {
-        Task {
-            do {
-                try await categoryService.deleteCategory(category.id)
-#if DEBUG
-                print("[Categories] Deleted remote category \(category.id) (\(category.name))")
-#endif
-            } catch {
-                #if DEBUG
-                print("[Categories] Failed to delete \(category.id): \(error)")
-                #endif
-            }
-        }
-    }
-
+    @MainActor
     private func syncCategoryUpdate(_ category: TaskCategory) {
-        Task {
-            do {
-                try await categoryService.updateCategory(category)
-#if DEBUG
-                print("[Categories] Updated remote category \(category.id) (\(category.name))")
-#endif
-            } catch {
-#if DEBUG
-                print("[Categories] Failed to update \(category.id): \(error)")
-#endif
-            }
+        enqueueCategoryMutation {
+            try await self.categoryService.updateCategory(category)
         }
     }
 
@@ -883,25 +882,29 @@ final class ScheduleViewModel: ObservableObject {
 
     @MainActor
     func refreshCategoriesFromRemote() async {
-        guard !isRefreshingCategories else { return }
+        categoryRefreshVersion += 1
+        let version = categoryRefreshVersion
         isRefreshingCategories = true
-        defer { isRefreshingCategories = false }
+        defer {
+            if version == categoryRefreshVersion { isRefreshingCategories = false }
+        }
         do {
+            await categoryMutationTask?.value
             let remoteCategories = try await categoryService.importCategories()
+            guard version == categoryRefreshVersion else { return }
             // The remote snapshot is authoritative, including deletions and an empty table.
             categories = remoteCategories
             saveCategories()
             categoryRefreshError = nil
+            categoriesLastRefreshedAt = Date()
         } catch {
+            guard version == categoryRefreshVersion else { return }
             categoryRefreshError = "No se pudieron actualizar los tipos. \(error.localizedDescription)"
         }
     }
 
     @MainActor
     func refreshFromRemote() async {
-        guard !isRefreshingRemote else { return }
-        isRefreshingRemote = true
-        defer { isRefreshingRemote = false }
         // Focuses resolve their type names against the latest category list.
         await refreshCategoriesFromRemote()
         await refreshFocusesFromRemote()
