@@ -103,6 +103,28 @@ struct TaskItem: Identifiable, Codable, Hashable {
     }
 }
 
+enum FocusKind: String, Codable, CaseIterable, Identifiable {
+    case project
+    case once
+    case daily
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .project: "Proyecto"
+        case .once: "Una vez"
+        case .daily: "Cada día"
+        }
+    }
+}
+
+struct FocusCompletion: Codable, Hashable {
+    let day: Date
+    let taskID: UUID?
+    let minutes: Int
+}
+
 struct FocusItem: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
@@ -112,6 +134,8 @@ struct FocusItem: Identifiable, Codable, Hashable {
     var taskIDs: [UUID]
     var proposedCategoryID: UUID?
     var priority: Int
+    let kind: FocusKind
+    var completions: [FocusCompletion]
 
     init(id: UUID = UUID(),
          name: String,
@@ -120,7 +144,9 @@ struct FocusItem: Identifiable, Codable, Hashable {
          isCompleted: Bool? = nil,
          taskIDs: [UUID] = [],
          proposedCategoryID: UUID? = nil,
-         priority: Int = 0) {
+         priority: Int = 0,
+         kind: FocusKind = .project,
+         completions: [FocusCompletion] = []) {
         self.id = id
         self.name = name
         self.expectedMinutes = expectedMinutes
@@ -129,10 +155,13 @@ struct FocusItem: Identifiable, Codable, Hashable {
         self.taskIDs = taskIDs
         self.proposedCategoryID = proposedCategoryID
         self.priority = max(0, min(priority, 5))
+        self.kind = kind
+        self.completions = completions
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, expectedMinutes, actualMinutes, isCompleted, taskIDs, assignedTaskID, proposedCategoryID, priority
+        case kind, completions
     }
 
     init(from decoder: Decoder) throws {
@@ -151,6 +180,8 @@ struct FocusItem: Identifiable, Codable, Hashable {
         }
         proposedCategoryID = try container.decodeIfPresent(UUID.self, forKey: .proposedCategoryID)
         priority = (try container.decodeIfPresent(Int.self, forKey: .priority)) ?? 0
+        kind = try container.decodeIfPresent(FocusKind.self, forKey: .kind) ?? .project
+        completions = try container.decodeIfPresent([FocusCompletion].self, forKey: .completions) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -163,6 +194,10 @@ struct FocusItem: Identifiable, Codable, Hashable {
         try container.encode(taskIDs, forKey: .taskIDs)
         try container.encodeIfPresent(proposedCategoryID, forKey: .proposedCategoryID)
         try container.encode(priority, forKey: .priority)
+        if kind != .project {
+            try container.encode(kind, forKey: .kind)
+            try container.encode(completions, forKey: .completions)
+        }
     }
 }
 
@@ -215,7 +250,7 @@ final class ScheduleViewModel: ObservableObject {
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
 
-    var dayStart: Date
+    @Published private(set) var dayStart: Date
     var dayEnd: Date
 
     private let wakeUpKey = "agenda.wakeUpAnchor"
@@ -230,6 +265,12 @@ final class ScheduleViewModel: ObservableObject {
     private let fallbackDefaults = UserDefaults.standard
     private let focusService: FocusRemoteService
     private let focusCache: FocusStorageProvider?
+    private let quickFocusStorage: UserDefaultsFocusStorage
+
+    private static let quickFocusCategory = TaskCategory(
+        id: UUID(uuidString: "2CB33BF9-26D7-4E20-80DD-D2B81C7B0896")!,
+        name: "Focus", colorHex: "#697386"
+    )
 
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current,
@@ -246,6 +287,7 @@ final class ScheduleViewModel: ObservableObject {
         self.focusService = resolvedFocusService
         self.categoryService = categoryService ?? SupabaseTaskCategoryService.shared
         self.focusCache = resolvedFocusService as? FocusStorageProvider
+        self.quickFocusStorage = UserDefaultsFocusStorage(defaults: defaults, key: "agenda.quickFocuses.storage")
         categories = []
         tasks = []
         dayLogs = []
@@ -255,15 +297,15 @@ final class ScheduleViewModel: ObservableObject {
         let candidateStart = Self.dailyStart(for: now, calendar: self.calendar)
         let stored = defaults.object(forKey: wakeUpKey) as? Date
         var previousDayStart: Date?
-        if let stored, self.calendar.isDate(stored, inSameDayAs: candidateStart), stored == candidateStart {
-            dayStart = stored
+        let initialStart: Date
+        if let stored, stored >= candidateStart {
+            initialStart = stored
         } else {
             previousDayStart = stored
-            dayStart = candidateStart
-            defaults.set(candidateStart, forKey: wakeUpKey)
+            initialStart = candidateStart
         }
-
-        let nextMidnight = self.calendar.startOfDay(for: self.calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+        dayStart = initialStart
+        let nextMidnight = self.calendar.startOfDay(for: self.calendar.date(byAdding: .day, value: 1, to: initialStart) ?? initialStart)
         dayEnd = nextMidnight
 
         migrateLegacyDataIfNeeded()
@@ -297,6 +339,7 @@ final class ScheduleViewModel: ObservableObject {
         }
         defaults.set(Self.blockMinutes, forKey: blockVersionKey)
 
+        dayLogs = loadedLogs
         if let previousDayStart {
             archiveDay(date: previousDayStart, tasks: loadedTasks)
             tasks = []
@@ -304,7 +347,8 @@ final class ScheduleViewModel: ObservableObject {
         } else {
             tasks = loadedTasks
         }
-        dayLogs = loadedLogs
+        defaults.set(initialStart, forKey: wakeUpKey)
+        focuses = quickFocusStorage.loadFocuses()
         cleanupFocusAssignments()
     }
 
@@ -360,7 +404,8 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func category(for id: UUID) -> TaskCategory? {
-        categories.first { $0.id == id }
+        if id == Self.quickFocusCategory.id { return Self.quickFocusCategory }
+        return categories.first { $0.id == id }
     }
 
     func categoryID(named name: String) -> UUID? {
@@ -395,18 +440,24 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func endCurrentDay() {
-        let snapshot = tasks
-        archiveDay(date: dayStart, tasks: snapshot)
+        guard let nextStart = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return }
+        startNewDay(at: nextStart)
+    }
+
+    func advanceDayIfNeeded(at date: Date = Date()) {
+        let currentStart = Self.dailyStart(for: date, calendar: calendar)
+        if currentStart > dayStart {
+            startNewDay(at: currentStart)
+        }
+    }
+
+    private func startNewDay(at nextStart: Date) {
+        archiveDay(date: dayStart, tasks: tasks)
         mutateTasks { tasks in
             tasks.removeAll()
         }
-        cleanupFocusAssignments()
-
-        if let nextStart = calendar.date(byAdding: .day, value: 1, to: dayStart) {
-            dayStart = nextStart
-        }
-        let nextMidnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
-        dayEnd = nextMidnight
+        dayEnd = timelineDayEnd(for: nextStart)
+        dayStart = nextStart
         defaults.set(dayStart, forKey: wakeUpKey)
     }
 
@@ -463,13 +514,25 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func toggleCompletion(for task: TaskItem) {
+        guard let currentTask = self.task(with: task.id) else { return }
         update(taskID: task.id) { mutable in
             mutable.isCompleted.toggle()
         }
-        if let focusID = task.focusID,
+
+        if currentTask.isCompleted {
+            mutateFocuses { focuses in
+                for index in focuses.indices where focuses[index].kind != .project {
+                    focuses[index].completions.removeAll { $0.taskID == currentTask.id }
+                }
+            }
+        }
+        if let focusID = currentTask.focusID,
            let focus = focus(with: focusID) {
-            let minutes = task.duration * Self.blockMinutes
-            logFocusUsage(focus, minutes: minutes)
+            if focus.kind == .project {
+                logFocusUsage(focus, minutes: currentTask.duration * Self.blockMinutes)
+            } else if !currentTask.isCompleted {
+                recordQuickFocusCompletion(focus, task: currentTask)
+            }
         }
     }
 
@@ -498,13 +561,16 @@ final class ScheduleViewModel: ObservableObject {
                   expectedMinutes: Int? = nil,
                   actualMinutes: Int? = nil,
                   proposedCategoryID: UUID? = nil,
-                  priority: Int = 0) -> FocusItem {
-        let newFocus = FocusItem(id: focusService.canonicalFocusID(for: UUID()),
+                  priority: Int = 0,
+                  kind: FocusKind = .project) -> FocusItem {
+        let id = UUID()
+        let newFocus = FocusItem(id: kind == .project ? focusService.canonicalFocusID(for: id) : id,
                                  name: name.isEmpty ? "Nuevo focus" : name,
                                  expectedMinutes: expectedMinutes,
                                  actualMinutes: actualMinutes,
                                  proposedCategoryID: proposedCategoryID,
-                                 priority: priority)
+                                 priority: priority,
+                                 kind: kind)
         mutateFocuses { focuses in
             focuses.append(newFocus)
         }
@@ -516,6 +582,14 @@ final class ScheduleViewModel: ObservableObject {
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             focuses[index] = focus
         }
+    }
+
+    func importQuickFocuses(from text: String) {
+        let importedFocuses = QuickFocusImportLine.parse(text).map { line in
+            FocusItem(name: line.name, kind: line.isDaily ? .daily : .once)
+        }
+        guard !importedFocuses.isEmpty else { return }
+        mutateFocuses { $0.append(contentsOf: importedFocuses) }
     }
 
     func deleteFocus(_ focus: FocusItem) {
@@ -533,6 +607,10 @@ final class ScheduleViewModel: ObservableObject {
     func assignFocus(_ focus: FocusItem, to task: TaskItem?) {
         guard let task = task,
               let taskEntity = self.task(with: task.id) else { return }
+        if focus.kind != .project {
+            guard let currentFocus = self.focus(with: focus.id),
+                  canAssignQuickFocus(currentFocus, to: taskEntity) else { return }
+        }
         let taskID = task.id
         let previousFocusID = taskEntity.focusID
 
@@ -560,6 +638,18 @@ final class ScheduleViewModel: ObservableObject {
 
     @discardableResult
     func scheduleFocusAtCurrentTime(_ focus: FocusItem, referenceDate: Date = Date()) -> TaskItem? {
+        if focus.kind != .project {
+            guard let current = self.focus(with: focus.id),
+                  !isFocusDone(current), current.taskIDs.isEmpty,
+                  let startIndex = nextAvailableStart(after: referenceDate) else { return nil }
+            let category = current.proposedCategoryID.flatMap { self.category(for: $0) } ?? Self.quickFocusCategory
+            let task = TaskItem(categoryID: category.id, startIndex: startIndex, duration: 1, focusID: current.id)
+            mutateTasks { tasks in
+                tasks.append(task)
+                tasks.sort { $0.startIndex < $1.startIndex }
+            }
+            return task
+        }
         guard let categoryID = focus.proposedCategoryID,
               let category = category(for: categoryID) else { return nil }
         print("[ScheduleViewModel] Scheduling focus using category id: \(categoryID)")
@@ -609,7 +699,7 @@ final class ScheduleViewModel: ObservableObject {
         }
 
         var candidates = focuses.compactMap { focus -> (focus: FocusItem, remaining: Int)? in
-            guard !(focus.isCompleted ?? false),
+            guard focus.kind == .project, !(focus.isCompleted ?? false),
                   focus.priority > 0,
                   let categoryID = focus.proposedCategoryID,
                   category(for: categoryID) != nil,
@@ -742,7 +832,7 @@ final class ScheduleViewModel: ObservableObject {
         var createdByFocus: [UUID: [UUID]] = [:]
 
         for proposal in proposals.sorted(by: { $0.startIndex < $1.startIndex }) {
-            guard focuses.contains(where: { $0.id == proposal.focusID && !($0.isCompleted ?? false) }),
+            guard focuses.contains(where: { $0.id == proposal.focusID && $0.kind == .project && !($0.isCompleted ?? false) }),
                   category(for: proposal.categoryID) != nil,
                   proposal.duration > 0,
                   proposal.startIndex >= 0,
@@ -782,6 +872,12 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     func completeFocus(_ focus: FocusItem) {
+        if focus.kind != .project {
+            if let current = self.focus(with: focus.id), !isFocusDone(current) {
+                toggleQuickFocus(current)
+            }
+            return
+        }
         mutateFocuses { focuses in
             guard let index = focuses.firstIndex(where: { $0.id == focus.id }) else { return }
             focuses[index].isCompleted = true
@@ -789,6 +885,54 @@ final class ScheduleViewModel: ObservableObject {
         Task {
             try? await focusService.deleteFocus(focus.id)
         }
+    }
+
+    func isFocusDone(_ focus: FocusItem) -> Bool {
+        switch focus.kind {
+        case .project: focus.isCompleted == true
+        case .once: !focus.completions.isEmpty
+        case .daily: focus.completions.contains { $0.day == dayStart }
+        }
+    }
+
+    var pendingQuickFocuses: [FocusItem] {
+        focuses.filter { $0.kind != .project && !isFocusDone($0) }
+    }
+
+    var completedQuickFocusesToday: [FocusItem] {
+        focuses.filter { focus in
+            focus.kind != .project && focus.completions.contains { $0.day == dayStart }
+        }
+    }
+
+    func canAssignQuickFocus(_ focus: FocusItem, to task: TaskItem) -> Bool {
+        task.focusID == focus.id || (!task.isCompleted && !isFocusDone(focus) && focus.taskIDs.isEmpty)
+    }
+
+    func toggleQuickFocus(_ focus: FocusItem) {
+        guard let current = self.focus(with: focus.id), current.kind != .project else { return }
+        let completion = current.completions.first { $0.day == dayStart }
+        if let completion {
+            if let taskID = completion.taskID, let task = task(with: taskID), task.isCompleted {
+                toggleCompletion(for: task)
+            } else {
+                var updated = current
+                updated.completions.removeAll { $0.day == dayStart }
+                updateFocus(updated)
+            }
+        } else if let taskID = current.taskIDs.first, let task = task(with: taskID), !task.isCompleted {
+            toggleCompletion(for: task)
+        } else {
+            recordQuickFocusCompletion(current, task: nil)
+        }
+    }
+
+    private func recordQuickFocusCompletion(_ focus: FocusItem, task: TaskItem?) {
+        guard !isFocusDone(focus) else { return }
+        var updated = focus
+        updated.completions.append(FocusCompletion(day: dayStart, taskID: task?.id,
+                                                   minutes: (task?.duration ?? 0) * Self.blockMinutes))
+        updateFocus(updated)
     }
 
     func clearFocus(for task: TaskItem) {
@@ -1074,9 +1218,15 @@ final class ScheduleViewModel: ObservableObject {
         guard updated != focuses else { return }
         let previous = focuses
         focuses = updated
-        focusCache?.saveFocuses(updated)
-        if shouldSyncRemote {
-            syncFocuses(previous: previous, updated: updated)
+        let quickFocuses = updated.filter { $0.kind != .project }
+        if quickFocuses != previous.filter({ $0.kind != .project }) {
+            quickFocusStorage.saveFocuses(quickFocuses)
+        }
+        let previousProjects = previous.filter { $0.kind == .project }
+        let updatedProjects = updated.filter { $0.kind == .project }
+        if previousProjects != updatedProjects {
+            focusCache?.saveFocuses(updatedProjects)
+            if shouldSyncRemote { syncFocuses(previous: previousProjects, updated: updatedProjects) }
         }
     }
 
@@ -1143,6 +1293,10 @@ final class ScheduleViewModel: ObservableObject {
             var merged: [FocusItem] = []
             var aliases: [UUID: UUID] = [:]
             for local in focuses {
+                guard local.kind == .project else {
+                    merged.append(local)
+                    continue
+                }
                 let canonicalID = focusService.canonicalFocusID(for: local.id)
                 if canonicalID != local.id { aliases[local.id] = canonicalID }
                 var normalized = FocusItem(id: canonicalID,
@@ -1255,8 +1409,11 @@ final class ScheduleViewModel: ObservableObject {
         var updated = focuses
         var changed = false
         for index in updated.indices {
-            let filtered = updated[index].taskIDs.filter { validIDs.contains($0) }
-            if filtered.count != updated[index].taskIDs.count {
+            let focus = updated[index]
+            let filtered = focus.kind == .project
+                ? focus.taskIDs.filter { validIDs.contains($0) }
+                : tasks.filter { $0.focusID == focus.id }.map(\.id)
+            if filtered != focus.taskIDs {
                 updated[index].taskIDs = filtered
                 changed = true
             }

@@ -9,12 +9,14 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
-    @StateObject private var viewModel = ScheduleViewModel()
+    @ObservedObject var viewModel: ScheduleViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(BlockAlertScheduler.enabledKey) private var blockAlertsEnabled = false
+    private let dayTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
-            DayTimelineView(viewModel: viewModel)
+            DayTimelineView(viewModel: viewModel, blockAlertsEnabled: $blockAlertsEnabled)
                 .tabItem {
                     Label("Hoy", systemImage: "calendar")
                 }
@@ -37,9 +39,22 @@ struct ContentView: View {
         }
         .task(id: scenePhase) {
             if scenePhase == .active {
+                viewModel.advanceDayIfNeeded()
+                updateBlockAlerts()
                 await viewModel.refreshFromRemote()
             }
         }
+        .onChange(of: viewModel.blockAlerts) { _, _ in updateBlockAlerts() }
+        .onChange(of: blockAlertsEnabled) { _, _ in updateBlockAlerts() }
+        .onReceive(dayTimer) { date in
+            if scenePhase == .active {
+                viewModel.advanceDayIfNeeded(at: date)
+            }
+        }
+    }
+
+    private func updateBlockAlerts() {
+        AgendaApp.blockAlertScheduler.update(viewModel.blockAlerts, enabled: blockAlertsEnabled)
     }
 }
 
@@ -68,6 +83,7 @@ private enum FocusDataSource: String, CaseIterable, Identifiable {
 
 struct DayTimelineView: View {
     @ObservedObject var viewModel: ScheduleViewModel
+    @Binding var blockAlertsEnabled: Bool
     @State private var selectedDate: Date
 
     private let blockHeight: CGFloat = 56
@@ -98,9 +114,11 @@ struct DayTimelineView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showingEndDayConfirmation = false
     @State private var statsAlertText: String?
+    @State private var showingQuickFocuses = false
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
-    init(viewModel: ScheduleViewModel) {
+    init(viewModel: ScheduleViewModel, blockAlertsEnabled: Binding<Bool>) {
+        _blockAlertsEnabled = blockAlertsEnabled
         _viewModel = ObservedObject(initialValue: viewModel)
         _selectedDate = State(initialValue: viewModel.dayStart)
     }
@@ -109,6 +127,23 @@ struct DayTimelineView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 daySelector
+                if viewModel.isCurrentDay(selectedDate), !viewModel.pendingQuickFocuses.isEmpty {
+                    DisclosureGroup("Focus rápidos (\(viewModel.pendingQuickFocuses.count))", isExpanded: $showingQuickFocuses) {
+                        ScrollView {
+                            VStack(spacing: 8) {
+                                ForEach(viewModel.pendingQuickFocuses) { focus in
+                                    QuickFocusRow(focus: focus, viewModel: viewModel) {
+                                        scheduleError = "No hay un hueco disponible para este focus."
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .frame(maxHeight: 160)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                }
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -147,6 +182,11 @@ struct DayTimelineView: View {
             .onChange(of: selectedDate) { _ in
                 timelineRefreshID = UUID()
                 scrollToCurrentHour(animated: false, targetDate: selectedDate)
+            }
+            .onChange(of: viewModel.dayStart) { oldDay, newDay in
+                if selectedDate == oldDay {
+                    updateSelectedDate(newDay)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 scrollToCurrentHour(animated: false, targetDate: selectedDate)
@@ -233,6 +273,14 @@ struct DayTimelineView: View {
                         Image(systemName: "play.fill")
                     }
                     .disabled(!viewModel.isCurrentDay(selectedDate))
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Toggle("Avisar al terminar cada bloque", isOn: $blockAlertsEnabled)
+                    } label: {
+                        Image(systemName: blockAlertsEnabled ? "bell.fill" : "bell.slash")
+                    }
+                    .accessibilityLabel("Avisos de bloques")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -575,7 +623,7 @@ Sin focus: \(unfocused)
     }
 
     private func liveStatusInfo(for task: TaskItem, on date: Date) -> LiveStatusInfo? {
-        guard viewModel.isCurrentDay(date) else { return nil }
+        guard viewModel.isCurrentDay(date), !task.isCompleted else { return nil }
         let startDate = viewModel.date(for: task.startIndex, on: date)
         let endDate = viewModel.date(for: task.startIndex + task.duration, on: date)
         guard liveTime >= startDate, liveTime < endDate else { return nil }
@@ -1000,7 +1048,7 @@ struct CategoryManagerView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: AgendaApp.schedule)
 }
 
 struct AddCategorySheet: View {
@@ -1136,10 +1184,58 @@ private struct PersistedAvoidedScheduleWindow: Codable {
     let endMinutes: Int
 }
 
+private struct QuickFocusRow: View {
+    let focus: FocusItem
+    @ObservedObject var viewModel: ScheduleViewModel
+    let onSchedulingFailure: () -> Void
+
+    var body: some View {
+        let done = viewModel.isFocusDone(focus)
+        HStack {
+            Button {
+                viewModel.toggleQuickFocus(focus)
+            } label: {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(done ? Color.green : Color.secondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(done ? "Deshacer \(focus.name)" : "Completar \(focus.name)")
+            VStack(alignment: .leading) {
+                Text(focus.name)
+                Text(focus.kind.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !done {
+                if let id = focus.taskIDs.first, let task = viewModel.task(with: id) {
+                    Text(viewModel.label(for: task.startIndex))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        if viewModel.scheduleFocusAtCurrentTime(focus) == nil {
+                            onSchedulingFailure()
+                        }
+                    } label: {
+                        Image(systemName: "calendar.badge.plus")
+                            .padding(6)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Añadir \(focus.name) al siguiente hueco")
+                }
+            }
+        }
+    }
+}
+
 struct FocusManagerView: View {
     @ObservedObject var viewModel: ScheduleViewModel
     @State private var showingAddFocus = false
+    @State private var showingPhotoImport = false
     @State private var newFocusName: String = ""
+    @State private var newFocusKind: FocusKind = .project
     @State private var newFocusHours: String = ""
     @State private var newFocusProposedCategoryID: UUID? = nil
     @State private var newFocusPriority: Int = 0
@@ -1183,11 +1279,24 @@ struct FocusManagerView: View {
                         Text("Prioridad").tag(FocusSortMode.priority)
                     }
                     .pickerStyle(.segmented)
+                    Button("Importar tareas desde una foto", systemImage: "text.viewfinder") {
+                        showingPhotoImport = true
+                    }
                 }
 
-                if filteredFocuses.isEmpty {
+                if !viewModel.pendingQuickFocuses.isEmpty {
+                    Section("Hoy") {
+                        quickFocusRows(viewModel.pendingQuickFocuses)
+                    }
+                }
+                if !viewModel.completedQuickFocusesToday.isEmpty {
+                    Section("Hechos hoy") {
+                        quickFocusRows(viewModel.completedQuickFocusesToday)
+                    }
+                }
+                if filteredFocuses.isEmpty && viewModel.pendingQuickFocuses.isEmpty && viewModel.completedQuickFocusesToday.isEmpty {
                     ContentUnavailableView("No hay focuses pendientes", systemImage: "target", description: Text("Marca o añade nuevos focuses para verlos aquí."))
-                } else {
+                } else if !filteredFocuses.isEmpty {
                     focusListContent
                 }
             }
@@ -1215,6 +1324,11 @@ struct FocusManagerView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingPhotoImport) {
+                QuickFocusPhotoImportView { text in
+                    viewModel.importQuickFocuses(from: text)
+                }
+            }
             .sheet(isPresented: $showingAddFocus) {
                 NavigationStack {
                     Form {
@@ -1222,36 +1336,46 @@ struct FocusManagerView: View {
                             TextField("Descripción del focus", text: $newFocusName)
                                 .focused($focusFieldFocused)
                         }
-                        Section("Estimación") {
-                            Toggle("Indeterminado", isOn: $estimationIndeterminate)
-                                .onChange(of: estimationIndeterminate) { value in
-                                    if value {
-                                        newFocusHours = ""
-                                        hoursFieldFocused = false
-                                    } else {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                            hoursFieldFocused = true
+                        Section {
+                            Picker("Modalidad", selection: $newFocusKind) {
+                                ForEach(FocusKind.allCases) { kind in
+                                    Text(kind.title).tag(kind)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        if newFocusKind == .project {
+                            Section("Estimación") {
+                                Toggle("Indeterminado", isOn: $estimationIndeterminate)
+                                    .onChange(of: estimationIndeterminate) { value in
+                                        if value {
+                                            newFocusHours = ""
+                                            hoursFieldFocused = false
+                                        } else {
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                                hoursFieldFocused = true
+                                            }
                                         }
                                     }
-                                }
-                            if !estimationIndeterminate {
-                                TextField("Minutos", text: $newFocusHours)
-                                    .keyboardType(.numberPad)
-                                    .focused($hoursFieldFocused)
-                            }
-                        }
-                        Section("Propuesta de tipo") {
-                            Picker("Tipo", selection: $newFocusProposedCategoryID) {
-                                Text("Indeterminado").tag(UUID?.none)
-                                ForEach(viewModel.categories) { category in
-                                    Text(category.name).tag(Optional(category.id))
+                                if !estimationIndeterminate {
+                                    TextField("Minutos", text: $newFocusHours)
+                                        .keyboardType(.numberPad)
+                                        .focused($hoursFieldFocused)
                                 }
                             }
-                        }
-                        Section("Prioridad (0-5)") {
-                            Picker("Prioridad", selection: $newFocusPriority) {
-                                ForEach(0...5, id: \.self) { value in
-                                    Text(String(repeating: "★", count: value)).tag(value)
+                            Section("Propuesta de tipo") {
+                                Picker("Tipo", selection: $newFocusProposedCategoryID) {
+                                    Text("Indeterminado").tag(UUID?.none)
+                                    ForEach(viewModel.categories) { category in
+                                        Text(category.name).tag(Optional(category.id))
+                                    }
+                                }
+                            }
+                            Section("Prioridad (0-5)") {
+                                Picker("Prioridad", selection: $newFocusPriority) {
+                                    ForEach(0...5, id: \.self) { value in
+                                        Text(String(repeating: "★", count: value)).tag(value)
+                                    }
                                 }
                             }
                         }
@@ -1285,34 +1409,49 @@ struct FocusManagerView: View {
                         Section("Descripción") {
                             TextField("Descripción", text: $focusEditName)
                         }
-                        Section("Estimación") {
-                            Toggle("Indeterminado", isOn: $editEstimationIndeterminate)
-                                .onChange(of: editEstimationIndeterminate) { value in
-                                    if value {
-                                        focusEditHours = ""
+                        if focus.kind == .project {
+                            Section("Estimación") {
+                                Toggle("Indeterminado", isOn: $editEstimationIndeterminate)
+                                    .onChange(of: editEstimationIndeterminate) { value in
+                                        if value {
+                                            focusEditHours = ""
+                                        }
                                     }
+                                if !editEstimationIndeterminate {
+                                    TextField("Minutos", text: $focusEditHours)
+                                        .keyboardType(.numberPad)
                                 }
-                            if !editEstimationIndeterminate {
-                                TextField("Minutos", text: $focusEditHours)
+                            }
+                            Section("Tiempo trabajado (min)") {
+                                TextField("Minutos", text: $focusEditActualMinutes)
                                     .keyboardType(.numberPad)
                             }
-                        }
-                        Section("Tiempo trabajado (min)") {
-                            TextField("Minutos", text: $focusEditActualMinutes)
-                                .keyboardType(.numberPad)
-                        }
-                        Section("Propuesta de tipo") {
-                            Picker("Tipo", selection: $focusEditProposedCategoryID) {
-                                Text("Indeterminado").tag(UUID?.none)
-                                ForEach(viewModel.categories) { category in
-                                    Text(category.name).tag(Optional(category.id))
+                            Section("Propuesta de tipo") {
+                                Picker("Tipo", selection: $focusEditProposedCategoryID) {
+                                    Text("Indeterminado").tag(UUID?.none)
+                                    ForEach(viewModel.categories) { category in
+                                        Text(category.name).tag(Optional(category.id))
+                                    }
                                 }
                             }
-                        }
-                        Section("Prioridad (0-5)") {
-                            Picker("Prioridad", selection: $focusEditPriority) {
-                                ForEach(0...5, id: \.self) { value in
-                                    Text(String(repeating: "★", count: value)).tag(value)
+                            Section("Prioridad (0-5)") {
+                                Picker("Prioridad", selection: $focusEditPriority) {
+                                    ForEach(0...5, id: \.self) { value in
+                                        Text(String(repeating: "★", count: value)).tag(value)
+                                    }
+                                }
+                            }
+                        } else if !focus.completions.isEmpty {
+                            Section("Historial") {
+                                ForEach(focus.completions.reversed(), id: \.day) { completion in
+                                    HStack {
+                                        Text(completion.day, style: .date)
+                                        Spacer()
+                                        if completion.minutes > 0 {
+                                            Text("\(completion.minutes) min")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1327,14 +1466,16 @@ struct FocusManagerView: View {
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Guardar") {
-                                guard var updated = editingFocus else { return }
-                                updated.name = focusEditName
-                                let estimateText = focusEditHours.trimmingCharacters(in: .whitespacesAndNewlines)
-                                let estimatedMinutes = editEstimationIndeterminate ? nil : max(0, Int(estimateText) ?? 0)
-                                updated.expectedMinutes = estimatedMinutes
-                                updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
-                                updated.proposedCategoryID = focusEditProposedCategoryID
-                                updated.priority = focusEditPriority
+                                guard var updated = viewModel.focus(with: focus.id) else { return }
+                                updated.name = focusEditName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if updated.kind == .project {
+                                    let estimateText = focusEditHours.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let estimatedMinutes = editEstimationIndeterminate ? nil : max(0, Int(estimateText) ?? 0)
+                                    updated.expectedMinutes = estimatedMinutes
+                                    updated.actualMinutes = max(0, Int(focusEditActualMinutes) ?? 0)
+                                    updated.proposedCategoryID = focusEditProposedCategoryID
+                                    updated.priority = focusEditPriority
+                                }
                                 viewModel.updateFocus(updated)
                                 editingFocus = nil
                                 resetEditFocusState()
@@ -1458,6 +1599,7 @@ struct FocusManagerView: View {
                         refreshAutomaticSchedule()
                     }
                     .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: viewModel.dayStart) { _ in refreshAutomaticSchedule() }
                 }
             }
             .alert("Focus", isPresented: Binding(
@@ -1484,7 +1626,7 @@ struct FocusManagerView: View {
     private var canSaveFocus: Bool {
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if estimationIndeterminate { return true }
+        if newFocusKind != .project || estimationIndeterminate { return true }
         let minutesValue = newFocusHours.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let minutes = Int(minutesValue), minutes > 0 else { return false }
         return true
@@ -1493,6 +1635,11 @@ struct FocusManagerView: View {
     private func saveFocus() {
         guard showingAddFocus, canSaveFocus else { return }
         let trimmed = newFocusName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if newFocusKind != .project {
+            viewModel.addFocus(name: trimmed, kind: newFocusKind)
+            resetFocusForm()
+            return
+        }
         let minutesInput = newFocusHours.trimmingCharacters(in: .whitespacesAndNewlines)
         let minutes = estimationIndeterminate ? nil : max(0, Int(minutesInput) ?? 0)
         viewModel.addFocus(name: trimmed,
@@ -1721,8 +1868,10 @@ struct FocusManagerView: View {
     private func resetFocusForm() {
         showingAddFocus = false
         newFocusName = ""
+        newFocusKind = .project
         newFocusHours = ""
         newFocusProposedCategoryID = nil
+        newFocusPriority = 0
         estimationIndeterminate = true
         focusFieldFocused = false
         hoursFieldFocused = false
@@ -1739,9 +1888,26 @@ struct FocusManagerView: View {
 
     private var filteredFocuses: [FocusItem] {
         let active = viewModel.focuses.filter { focus in
-            !(focus.isCompleted ?? false)
+            focus.kind == .project && !viewModel.isFocusDone(focus)
         }
         return Array(active.reversed())
+    }
+
+    private func quickFocusRows(_ focuses: [FocusItem]) -> some View {
+        ForEach(focuses) { focus in
+            QuickFocusRow(focus: focus, viewModel: viewModel) {
+                focusActionMessage = "No hay un hueco disponible para este focus."
+            }
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Editar", systemImage: "pencil") {
+                    editingFocus = focus
+                }
+            }
+        }
+        .onDelete { offsets in
+            deleteFocuses(from: focuses, at: offsets)
+        }
     }
 
     private var prioritySortedFocuses: [FocusItem] {
@@ -1831,6 +1997,7 @@ struct FocusManagerView: View {
     private var canSaveEditedFocus: Bool {
         let trimmed = focusEditName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        if editingFocus?.kind != .project { return true }
         if editEstimationIndeterminate { return true }
         let estimateText = focusEditHours.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let minutes = Int(estimateText), minutes > 0 else { return false }
@@ -2025,7 +2192,11 @@ struct TaskEditorSheet: View {
     }
 
     private var availableFocuses: [FocusItem] {
-        viewModel.focuses.filter { !($0.isCompleted ?? false) }
+        guard let task = viewModel.task(with: taskID) else { return [] }
+        return viewModel.focuses.filter { focus in
+            if focus.kind == .project { return !viewModel.isFocusDone(focus) }
+            return viewModel.canAssignQuickFocus(focus, to: task)
+        }
     }
 
     private var sortedAvailableFocuses: [FocusItem] {
@@ -2130,7 +2301,7 @@ struct FocusPriorityAdjustView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var editableFocuses: [FocusItem] {
-        viewModel.focuses.filter { !($0.isCompleted ?? false) }
+        viewModel.focuses.filter { $0.kind == .project && !viewModel.isFocusDone($0) }
     }
 
     private var groupedFocuses: [FocusPrioritySection] {

@@ -293,6 +293,105 @@ final class ScheduleViewModelTests: XCTestCase {
     
     // MARK: - Tests
 
+    func testBlockAlertFollowsTaskMovesAndCompletion() throws {
+        let task = makeTask(start: 2, duration: 3)
+        let (viewModel, cleanup) = makeViewModel(tasks: [task])
+        defer { cleanup() }
+
+        let original = try XCTUnwrap(viewModel.blockAlerts.first)
+        XCTAssertEqual(original.start, viewModel.date(for: 2))
+        XCTAssertEqual(original.end, viewModel.date(for: 5))
+        XCTAssertEqual(viewModel.blockAlerts.first?.id, original.id)
+
+        viewModel.move(task: task, to: 7)
+        let moved = try XCTUnwrap(viewModel.blockAlerts.first)
+        XCTAssertEqual(moved.start, viewModel.date(for: 7))
+        XCTAssertEqual(moved.end, viewModel.date(for: 10))
+        XCTAssertNotEqual(moved.id, original.id)
+
+        viewModel.toggleCompletion(for: task)
+        XCTAssertTrue(viewModel.blockAlerts.isEmpty)
+    }
+
+    func testBlockAlarmUsesRemainingTimeOnceTheTaskHasStarted() {
+        let start = Date(timeIntervalSinceReferenceDate: 3_600)
+        let end = start.addingTimeInterval(1_800)
+        let alert = BlockAlert(taskID: UUID(), taskName: "Tarea", start: start, end: end)
+
+        XCTAssertEqual(alert.alarmTiming(at: start.addingTimeInterval(-60)),
+                       .scheduled(end: end, duration: 1_800))
+        XCTAssertEqual(alert.alarmTiming(at: start), .immediate(duration: 1_800))
+        XCTAssertEqual(alert.alarmTiming(at: start.addingTimeInterval(600)), .immediate(duration: 1_200))
+        XCTAssertNil(alert.alarmTiming(at: end))
+    }
+
+    func testImportQuickFocusesUsesOnlyTrailingSiempreAsDailyMarker() throws {
+        let suite = "QuickFocusImport-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil)
+        let existing = viewModel.addFocus(name: "Tarea existente", kind: .once)
+
+        viewModel.importQuickFocuses(from: "Llamar al proveedor\r\n\r\n  Revisar la caja (SIEMPRE).  \nGuardar siempre el recibo\nRevisar casisiempre\nsiempre")
+
+        let reloaded = ScheduleViewModel(defaults: defaults, focusService: nil)
+        XCTAssertEqual(reloaded.focuses.first?.id, existing.id)
+        XCTAssertEqual(reloaded.focuses.map(\.name), [
+            "Tarea existente", "Llamar al proveedor", "Revisar la caja",
+            "Guardar siempre el recibo", "Revisar casisiempre"
+        ])
+        XCTAssertEqual(reloaded.focuses.map(\.kind), [.once, .once, .daily, .once, .once])
+    }
+
+    func testOneTimeQuickFocusUsesOneBoxAndCanBeReopened() throws {
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        let focus = viewModel.addFocus(name: "Llamar al proveedor", kind: .once)
+        let start = viewModel.date(for: 0)
+        let task = try XCTUnwrap(viewModel.scheduleFocusAtCurrentTime(focus, referenceDate: start))
+        XCTAssertEqual(task.focusID, focus.id)
+        XCTAssertNotNil(viewModel.category(for: task.categoryID))
+        XCTAssertNil(viewModel.scheduleFocusAtCurrentTime(focus, referenceDate: start))
+
+        viewModel.toggleCompletion(for: task)
+        XCTAssertTrue(viewModel.pendingQuickFocuses.isEmpty)
+        XCTAssertEqual(viewModel.completedQuickFocusesToday.map(\.id), [focus.id])
+
+        viewModel.toggleCompletion(for: task)
+        XCTAssertEqual(viewModel.pendingQuickFocuses.map(\.id), [focus.id])
+
+        viewModel.toggleCompletion(for: task)
+        viewModel.endCurrentDay()
+        XCTAssertTrue(viewModel.pendingQuickFocuses.isEmpty)
+        XCTAssertTrue(viewModel.completedQuickFocusesToday.isEmpty)
+    }
+
+    @MainActor
+    func testDailyQuickFocusReturnsAfterDayChangeAndKeepsHistoryOnReload() async throws {
+        let suite = "DailyQuickFocus-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil)
+        let focus = viewModel.addFocus(name: "Revisar la caja", kind: .daily)
+        let task = try XCTUnwrap(viewModel.scheduleFocusAtCurrentTime(focus, referenceDate: viewModel.dayStart))
+        viewModel.toggleQuickFocus(focus)
+        XCTAssertEqual(viewModel.task(with: task.id)?.isCompleted, true)
+        XCTAssertEqual(viewModel.completedQuickFocusesToday.map(\.id), [focus.id])
+        let firstDay = viewModel.dayStart
+        let secondDay = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: firstDay))
+
+        viewModel.advanceDayIfNeeded(at: secondDay)
+        XCTAssertEqual(viewModel.pendingQuickFocuses.map(\.id), [focus.id])
+        XCTAssertEqual(viewModel.dayLogs.first?.tasks.first?.id, task.id)
+
+        let reloaded = ScheduleViewModel(defaults: defaults, focusService: nil)
+        await reloaded.refreshFocusesFromRemote()
+        XCTAssertEqual(reloaded.pendingQuickFocuses.map(\.id), [focus.id])
+        let savedFocus = try XCTUnwrap(reloaded.focus(with: focus.id))
+        XCTAssertEqual(savedFocus.completions.map(\.day), [firstDay])
+        XCTAssertTrue(savedFocus.taskIDs.isEmpty)
+    }
+
     func testProposeFocusScheduleUsesPriorityAndSplitsAroundExistingTasks() {
         let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
         let blocker = TaskItem(categoryID: category.id, startIndex: 6, duration: 3)

@@ -1,80 +1,60 @@
-//
-//  AgendaWidgetLiveActivity.swift
-//  AgendaWidget
-//
-//  Created by Antonio Muñoz on 25/11/25.
-//
-
 import ActivityKit
-import WidgetKit
+import AlarmKit
 import SwiftUI
+import WidgetKit
 
-struct AgendaWidgetAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        // Dynamic stateful properties about your activity go here!
-        var emoji: String
-    }
-
-    // Fixed non-changing properties about your activity go here!
-    var name: String
-}
-
+@available(iOS 26.0, *)
 struct AgendaWidgetLiveActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: AgendaWidgetAttributes.self) { context in
-            // Lock screen/banner UI goes here
-            VStack {
-                Text("Hello \(context.state.emoji)")
+        ActivityConfiguration(for: AlarmAttributes<BlockAlarmMetadata>.self) { context in
+            HStack {
+                Label(taskName(context), systemImage: "timer")
+                    .font(.headline)
+                    .lineLimit(2)
+                Spacer()
+                countdown(context)
+                    .font(.title2.bold())
+                    .frame(minWidth: 72, alignment: .trailing)
             }
-            .activityBackgroundTint(Color.cyan)
-            .activitySystemActionForegroundColor(Color.black)
-
+            .padding()
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded UI goes here.  Compose the expanded UI through
-                // various regions, like leading/trailing/center/bottom
                 DynamicIslandExpandedRegion(.leading) {
-                    Text("Leading")
+                    Image(systemName: "timer")
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("Trailing")
+                    countdown(context)
+                        .frame(minWidth: 72, alignment: .trailing)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text("Bottom \(context.state.emoji)")
-                    // more content
+                    Text(taskName(context))
+                        .lineLimit(1)
                 }
             } compactLeading: {
-                Text("L")
+                Image(systemName: "timer")
             } compactTrailing: {
-                Text("T \(context.state.emoji)")
+                countdown(context)
+                    .frame(width: 52)
             } minimal: {
-                Text(context.state.emoji)
+                Image(systemName: "timer")
             }
-            .widgetURL(URL(string: "http://www.apple.com"))
-            .keylineTint(Color.red)
         }
     }
-}
 
-extension AgendaWidgetAttributes {
-    fileprivate static var preview: AgendaWidgetAttributes {
-        AgendaWidgetAttributes(name: "World")
+    private func taskName(_ context: ActivityViewContext<AlarmAttributes<BlockAlarmMetadata>>) -> String {
+        context.attributes.metadata?.taskName ?? "Tarea de Agenda"
     }
-}
 
-extension AgendaWidgetAttributes.ContentState {
-    fileprivate static var smiley: AgendaWidgetAttributes.ContentState {
-        AgendaWidgetAttributes.ContentState(emoji: "😀")
-     }
-     
-     fileprivate static var starEyes: AgendaWidgetAttributes.ContentState {
-         AgendaWidgetAttributes.ContentState(emoji: "🤩")
-     }
-}
-
-#Preview("Notification", as: .content, using: AgendaWidgetAttributes.preview) {
-   AgendaWidgetLiveActivity()
-} contentStates: {
-    AgendaWidgetAttributes.ContentState.smiley
-    AgendaWidgetAttributes.ContentState.starEyes
+    private func countdown(_ context: ActivityViewContext<AlarmAttributes<BlockAlarmMetadata>>) -> Text {
+        if case let .countdown(timer) = context.state.mode {
+            let interval = context.attributes.metadata?.interval
+            let start = interval?.start ?? timer.startDate
+            let end = interval?.end ?? max(start, timer.fireDate)
+            return Text(timerInterval: start...end,
+                        countsDown: true,
+                        showsHours: end.timeIntervalSince(start) >= 3600)
+                .monospacedDigit()
+        }
+        return Text("0:00").monospacedDigit()
+    }
 }

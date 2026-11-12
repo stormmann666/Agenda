@@ -9,9 +9,16 @@ import SwiftUI
 
 @main
 struct AgendaApp: App {
+    @MainActor static let blockAlertScheduler = BlockAlertScheduler()
+    @MainActor static let schedule = ScheduleViewModel()
+
+    init() {
+        AgendaShortcuts.updateAppShortcutParameters()
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: Self.schedule)
         }
     }
 }
