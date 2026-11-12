@@ -1246,6 +1246,245 @@ private struct QuickFocusRow: View {
     }
 }
 
+private struct FocusScheduleView: View {
+    @ObservedObject var viewModel: ScheduleViewModel
+    @Binding var avoidedTimeWindows: [AvoidedScheduleWindow]
+    @Binding var focusSessionMinutes: Int
+    @Binding var maximumConsecutiveFocusTypes: Int
+    @Binding var breakMinutes: Int
+    let saveAvoidedTimeWindows: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("agenda.autoFocus.oneSessionPerDay") private var oneSessionPerRound = false
+    @State private var scheduleProposals: [FocusScheduleProposal] = []
+    @State private var schedulePreviewDay: Date?
+    @State private var scheduleReorderMessage: String?
+
+    var body: some View {
+        let day = viewModel.dayStart
+        let reservations = viewModel.tasks.sorted { $0.startIndex < $1.startIndex }
+        let proposals = scheduleProposals
+        let previewFits = schedulePreviewDay == day &&
+            viewModel.focusScheduleFits(proposals, from: day, avoiding: avoidedScheduleRanges, reservations: reservations)
+        NavigationStack {
+            List {
+                let now = Date()
+                let upcomingReservations = reservations.filter {
+                    viewModel.date(for: $0.startIndex + $0.duration, on: day) > now
+                }
+                Section("Configuración") {
+                    Toggle("Una sesión por proyecto antes de repetir", isOn: $oneSessionPerRound)
+                    Picker("Tiempo por tarea", selection: $focusSessionMinutes) {
+                        ForEach([15, 25, 30, 45, 60, 90], id: \.self) { minutes in
+                            Text("\(minutes) min").tag(minutes)
+                        }
+                    }
+                    if !oneSessionPerRound {
+                        Picker("Máximo del mismo tipo seguidos", selection: $maximumConsecutiveFocusTypes) {
+                            ForEach(1...5, id: \.self) { count in
+                                Text("\(count)").tag(count)
+                            }
+                        }
+                    }
+                    Picker("Descanso entre actividades", selection: $breakMinutes) {
+                        ForEach([0, 5, 10, 15, 20, 30], id: \.self) { minutes in
+                            Text(minutes == 0 ? "Sin descanso" : "\(minutes) min").tag(minutes)
+                        }
+                    }
+                    ForEach($avoidedTimeWindows) { $window in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Horario a evitar")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Button(role: .destructive) {
+                                    avoidedTimeWindows.removeAll { $0.id == window.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Eliminar horario a evitar")
+                            }
+                            DatePicker("Desde", selection: $window.start, displayedComponents: .hourAndMinute)
+                            DatePicker("Hasta", selection: $window.end, displayedComponents: .hourAndMinute)
+                            if window.end <= window.start {
+                                Text("La hora final debe ser posterior a la inicial.")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    Button {
+                        avoidedTimeWindows.append(AvoidedScheduleWindow())
+                    } label: {
+                        Label("Añadir horario a evitar", systemImage: "plus.circle")
+                    }
+                    Text("Se incluyen proyectos con prioridad del 1 al 5 y focuses rápidos con prioridad 3. Se respetan los bloques existentes y se omiten los huecos de solo 5 minutos.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        refreshAutomaticSchedule()
+                    } label: {
+                        Label("Actualizar propuesta", systemImage: "arrow.clockwise")
+                    }
+                }
+                Section("Propuesta · \(day.formatted(date: .abbreviated, time: .omitted))") {
+                    if let scheduleReorderMessage {
+                        Text(scheduleReorderMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    if !previewFits {
+                        Text("Actualizando la propuesta según los bloques reservados…")
+                            .foregroundStyle(.secondary)
+                    } else if proposals.isEmpty {
+                        Text("No hay focuses pendientes que quepan hoy con esta configuración.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(proposals) { proposal in
+                            scheduleProposalRow(proposal, on: day)
+                        }
+                        .onMove(perform: moveScheduleProposals)
+                        .onDelete(perform: deleteScheduleProposals)
+                    }
+                }
+                if !upcomingReservations.isEmpty {
+                    Section("Ya reservados en la agenda") {
+                        ForEach(upcomingReservations) { task in
+                            let focusName = task.focusID.flatMap { viewModel.focus(with: $0)?.name }
+                            let categoryName = viewModel.category(for: task.categoryID)?.name
+                            let start = viewModel.label(for: task.startIndex, on: day)
+                            let end = viewModel.label(for: task.startIndex + task.duration, on: day)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(focusName ?? categoryName ?? "Bloque reservado")
+                                Text("\(start)–\(end)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Plan automático")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Añadir a la agenda") {
+                        applyAutomaticSchedule()
+                    }
+                    .disabled(!previewFits || proposals.isEmpty || hasInvalidAvoidedWindow)
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    EditButton()
+                }
+            }
+            .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
+            .onChange(of: oneSessionPerRound) { refreshAutomaticSchedule() }
+            .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
+            .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
+            .onChange(of: avoidedTimeWindows) { _ in
+                saveAvoidedTimeWindows()
+                refreshAutomaticSchedule()
+            }
+            .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
+            .onChange(of: viewModel.categories) { refreshAutomaticSchedule() }
+            .onChange(of: viewModel.tasks) { refreshAutomaticSchedule() }
+            .onChange(of: viewModel.dayStart) { _ in refreshAutomaticSchedule() }
+            .onAppear { refreshAutomaticSchedule() }
+            .onChange(of: previewFits) { _, fits in
+                if !fits { refreshAutomaticSchedule() }
+            }
+        }
+    }
+
+    private func refreshAutomaticSchedule() {
+        scheduleReorderMessage = nil
+        schedulePreviewDay = viewModel.dayStart
+        scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
+                                                           oneSessionPerRound: oneSessionPerRound,
+                                                           maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
+                                                           breakMinutes: breakMinutes,
+                                                           avoiding: avoidedScheduleRanges)
+            .sorted { $0.startIndex < $1.startIndex }
+    }
+
+    private func moveScheduleProposals(from offsets: IndexSet, to destination: Int) {
+        let previous = scheduleProposals
+        var reordered = scheduleProposals
+        reordered.move(fromOffsets: offsets, toOffset: destination)
+        if let reflowed = viewModel.reflowFocusSchedule(reordered,
+                                                        breakMinutes: breakMinutes,
+                                                        avoiding: avoidedScheduleRanges) {
+            scheduleProposals = reflowed
+            scheduleReorderMessage = nil
+        } else {
+            scheduleProposals = previous
+            scheduleReorderMessage = "Ese orden no cabe en los huecos disponibles."
+        }
+    }
+
+    private func deleteScheduleProposals(at offsets: IndexSet) {
+        var remaining = scheduleProposals
+        remaining.remove(atOffsets: offsets)
+        if remaining.isEmpty {
+            scheduleProposals = []
+            scheduleReorderMessage = nil
+            return
+        }
+        if let reflowed = viewModel.reflowFocusSchedule(remaining,
+                                                        breakMinutes: breakMinutes,
+                                                        avoiding: avoidedScheduleRanges) {
+            scheduleProposals = reflowed
+            scheduleReorderMessage = nil
+        } else {
+            scheduleReorderMessage = "No se pudieron recolocar las tareas restantes."
+        }
+    }
+
+    private var avoidedScheduleRanges: [Range<Date>] {
+        avoidedTimeWindows.compactMap { $0.range(on: viewModel.dayStart) }
+    }
+
+    private var hasInvalidAvoidedWindow: Bool {
+        avoidedTimeWindows.contains { $0.range(on: viewModel.dayStart) == nil }
+    }
+
+    private func applyAutomaticSchedule() {
+        if schedulePreviewDay == viewModel.dayStart,
+           viewModel.applyFocusSchedule(scheduleProposals, avoiding: avoidedScheduleRanges) {
+            dismiss()
+        } else {
+            refreshAutomaticSchedule()
+            scheduleReorderMessage = "La hora o la agenda han cambiado. Revisa la propuesta actualizada."
+        }
+    }
+
+    @ViewBuilder
+    private func scheduleProposalRow(_ proposal: FocusScheduleProposal, on day: Date) -> some View {
+        if let focus = viewModel.focus(with: proposal.focusID),
+           let category = viewModel.category(for: proposal.categoryID) {
+            let start = viewModel.label(for: proposal.startIndex, on: day)
+            let end = viewModel.label(for: proposal.startIndex + proposal.duration, on: day)
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(category.color)
+                    .frame(width: 12, height: 12)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(focus.name)
+                        .font(.headline)
+                    Text("\(start)–\(end) · \(proposal.duration * ScheduleViewModel.blockMinutes) min")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 struct FocusManagerView: View {
     @ObservedObject var viewModel: ScheduleViewModel
     @State private var showingAddFocus = false
@@ -1269,15 +1508,11 @@ struct FocusManagerView: View {
     @State private var focusActionMessage: String?
     @State private var recentlyScheduledFocusID: UUID?
     @State private var showingPriorityAdjuster = false
-    @State private var scheduleProposals: [FocusScheduleProposal] = []
-    @State private var schedulePreviewDay: Date?
     @State private var showingSchedulePreview = false
     @State private var avoidedTimeWindows: [AvoidedScheduleWindow] = []
     @State private var focusSessionMinutes = 30
-    @AppStorage("agenda.autoFocus.oneSessionPerDay") private var oneSessionPerRound = false
     @State private var maximumConsecutiveFocusTypes = 2
     @State private var breakMinutes = 0
-    @State private var scheduleReorderMessage: String?
 
     private static let avoidedWindowsStorageKey = "agenda.autoFocus.avoidedWindows"
     private static let appGroupID = "group.com.antoniomunoz.Agenda"
@@ -1323,7 +1558,7 @@ struct FocusManagerView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     HStack {
                         Button {
-                            prepareAutomaticSchedule()
+                            showingSchedulePreview = true
                         } label: {
                             Label("Planificar", systemImage: "wand.and.stars")
                         }
@@ -1519,143 +1754,12 @@ struct FocusManagerView: View {
                 }
             }
             .sheet(isPresented: $showingSchedulePreview) {
-                NavigationStack {
-                    let proposals = scheduleProposals
-                    let previewDay = schedulePreviewDay
-                    let previewFits = previewDay == viewModel.dayStart &&
-                        viewModel.focusScheduleFits(proposals, from: viewModel.dayStart, avoiding: avoidedScheduleRanges)
-                    List {
-                        let now = Date()
-                        let reservations = viewModel.tasks
-                            .filter { viewModel.date(for: $0.startIndex + $0.duration) > now }
-                            .sorted { $0.startIndex < $1.startIndex }
-                        Section("Configuración") {
-                            Toggle("Una sesión por proyecto antes de repetir", isOn: $oneSessionPerRound)
-                            Picker("Tiempo por tarea", selection: $focusSessionMinutes) {
-                                ForEach([15, 25, 30, 45, 60, 90], id: \.self) { minutes in
-                                    Text("\(minutes) min").tag(minutes)
-                                }
-                            }
-                            if !oneSessionPerRound {
-                                Picker("Máximo del mismo tipo seguidos", selection: $maximumConsecutiveFocusTypes) {
-                                    ForEach(1...5, id: \.self) { count in
-                                        Text("\(count)").tag(count)
-                                    }
-                                }
-                            }
-                            Picker("Descanso entre actividades", selection: $breakMinutes) {
-                                ForEach([0, 5, 10, 15, 20, 30], id: \.self) { minutes in
-                                    Text(minutes == 0 ? "Sin descanso" : "\(minutes) min").tag(minutes)
-                                }
-                            }
-                            ForEach($avoidedTimeWindows) { $window in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack {
-                                        Text("Horario a evitar")
-                                            .font(.subheadline.weight(.semibold))
-                                        Spacer()
-                                        Button(role: .destructive) {
-                                            avoidedTimeWindows.removeAll { $0.id == window.id }
-                                        } label: {
-                                            Image(systemName: "trash")
-                                        }
-                                        .buttonStyle(.borderless)
-                                        .accessibilityLabel("Eliminar horario a evitar")
-                                    }
-                                    DatePicker("Desde", selection: $window.start, displayedComponents: .hourAndMinute)
-                                    DatePicker("Hasta", selection: $window.end, displayedComponents: .hourAndMinute)
-                                    if window.end <= window.start {
-                                        Text("La hora final debe ser posterior a la inicial.")
-                                            .font(.caption)
-                                            .foregroundStyle(.red)
-                                    }
-                                }
-                            }
-                            Button {
-                                avoidedTimeWindows.append(AvoidedScheduleWindow())
-                            } label: {
-                                Label("Añadir horario a evitar", systemImage: "plus.circle")
-                            }
-                            Text("Se incluyen proyectos con prioridad del 1 al 5 y focuses rápidos con prioridad 3. Los bloques existentes se respetan.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Button {
-                                refreshAutomaticSchedule()
-                            } label: {
-                                Label("Actualizar propuesta", systemImage: "arrow.clockwise")
-                            }
-                        }
-                        Section("Propuesta · \((previewDay ?? viewModel.dayStart).formatted(date: .abbreviated, time: .omitted))") {
-                            if let scheduleReorderMessage {
-                                Text(scheduleReorderMessage)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                            if !previewFits {
-                                Text("Actualizando la propuesta según los bloques reservados…")
-                                    .foregroundStyle(.secondary)
-                            } else if proposals.isEmpty {
-                                Text("No hay focuses pendientes que quepan hoy con esta configuración.")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(proposals) { proposal in
-                                    scheduleProposalRow(proposal)
-                                }
-                                .onMove(perform: moveScheduleProposals)
-                                .onDelete(perform: deleteScheduleProposals)
-                            }
-                        }
-                        if !reservations.isEmpty {
-                            Section("Ya reservados en la agenda") {
-                                ForEach(reservations) { task in
-                                    let focusName = task.focusID.flatMap { viewModel.focus(with: $0)?.name }
-                                    let categoryName = viewModel.category(for: task.categoryID)?.name
-                                    let start = viewModel.label(for: task.startIndex)
-                                    let end = viewModel.label(for: task.startIndex + task.duration)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(focusName ?? categoryName ?? "Bloque reservado")
-                                        Text("\(start)–\(end)")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("Plan automático")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancelar") {
-                                showingSchedulePreview = false
-                            }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Añadir a la agenda") {
-                                applyAutomaticSchedule()
-                            }
-                            .disabled(!previewFits || proposals.isEmpty || hasInvalidAvoidedWindow)
-                        }
-                        ToolbarItem(placement: .bottomBar) {
-                            EditButton()
-                        }
-                    }
-                    .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: oneSessionPerRound) { refreshAutomaticSchedule() }
-                    .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: avoidedTimeWindows) { _ in
-                        saveAvoidedTimeWindows()
-                        refreshAutomaticSchedule()
-                    }
-                    .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
-                    .onChange(of: viewModel.categories) { refreshAutomaticSchedule() }
-                    .onChange(of: viewModel.tasks) { refreshAutomaticSchedule() }
-                    .onChange(of: viewModel.dayStart) { _ in refreshAutomaticSchedule() }
-                    .onAppear { refreshAutomaticSchedule() }
-                    .onChange(of: previewFits) { _, fits in
-                        if !fits { refreshAutomaticSchedule() }
-                    }
-                }
+                FocusScheduleView(viewModel: viewModel,
+                                  avoidedTimeWindows: $avoidedTimeWindows,
+                                  focusSessionMinutes: $focusSessionMinutes,
+                                  maximumConsecutiveFocusTypes: $maximumConsecutiveFocusTypes,
+                                  breakMinutes: $breakMinutes,
+                                  saveAvoidedTimeWindows: saveAvoidedTimeWindows)
             }
             .alert("Focus", isPresented: Binding(
                 get: { focusActionMessage != nil },
@@ -1673,7 +1777,6 @@ struct FocusManagerView: View {
             }
             .refreshable {
                 await viewModel.refreshFromRemote()
-                refreshAutomaticSchedule()
             }
         }
     }
@@ -1704,63 +1807,6 @@ struct FocusManagerView: View {
         resetFocusForm()
     }
 
-    private func prepareAutomaticSchedule() {
-        schedulePreviewDay = nil
-        showingSchedulePreview = true
-    }
-
-    private func refreshAutomaticSchedule() {
-        scheduleReorderMessage = nil
-        schedulePreviewDay = viewModel.dayStart
-        scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
-                                                           oneSessionPerRound: oneSessionPerRound,
-                                                           maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
-                                                           breakMinutes: breakMinutes,
-                                                           avoiding: avoidedScheduleRanges)
-            .sorted { $0.startIndex < $1.startIndex }
-    }
-
-    private func moveScheduleProposals(from offsets: IndexSet, to destination: Int) {
-        let previous = scheduleProposals
-        var reordered = scheduleProposals
-        reordered.move(fromOffsets: offsets, toOffset: destination)
-        if let reflowed = viewModel.reflowFocusSchedule(reordered,
-                                                        breakMinutes: breakMinutes,
-                                                        avoiding: avoidedScheduleRanges) {
-            scheduleProposals = reflowed
-            scheduleReorderMessage = nil
-        } else {
-            scheduleProposals = previous
-            scheduleReorderMessage = "Ese orden no cabe en los huecos disponibles."
-        }
-    }
-
-    private func deleteScheduleProposals(at offsets: IndexSet) {
-        var remaining = scheduleProposals
-        remaining.remove(atOffsets: offsets)
-        if remaining.isEmpty {
-            scheduleProposals = []
-            scheduleReorderMessage = nil
-            return
-        }
-        if let reflowed = viewModel.reflowFocusSchedule(remaining,
-                                                        breakMinutes: breakMinutes,
-                                                        avoiding: avoidedScheduleRanges) {
-            scheduleProposals = reflowed
-            scheduleReorderMessage = nil
-        } else {
-            scheduleReorderMessage = "No se pudieron recolocar las tareas restantes."
-        }
-    }
-
-    private var avoidedScheduleRanges: [Range<Date>] {
-        avoidedTimeWindows.compactMap { $0.range(on: viewModel.dayStart) }
-    }
-
-    private var hasInvalidAvoidedWindow: Bool {
-        avoidedTimeWindows.contains { $0.range(on: viewModel.dayStart) == nil }
-    }
-
     private static var scheduleDefaults: UserDefaults {
         UserDefaults(suiteName: appGroupID) ?? .standard
     }
@@ -1786,36 +1832,6 @@ struct FocusManagerView: View {
         }
         guard let data = try? JSONEncoder().encode(stored) else { return }
         Self.scheduleDefaults.set(data, forKey: Self.avoidedWindowsStorageKey)
-    }
-
-    private func applyAutomaticSchedule() {
-        if schedulePreviewDay == viewModel.dayStart,
-           viewModel.applyFocusSchedule(scheduleProposals, avoiding: avoidedScheduleRanges) {
-            showingSchedulePreview = false
-            scheduleProposals = []
-        } else {
-            refreshAutomaticSchedule()
-            scheduleReorderMessage = "La hora o la agenda han cambiado. Revisa la propuesta actualizada."
-        }
-    }
-
-    @ViewBuilder
-    private func scheduleProposalRow(_ proposal: FocusScheduleProposal) -> some View {
-        if let focus = viewModel.focus(with: proposal.focusID),
-           let category = viewModel.category(for: proposal.categoryID) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(category.color)
-                    .frame(width: 12, height: 12)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(focus.name)
-                        .font(.headline)
-                    Text("\(viewModel.label(for: proposal.startIndex))–\(viewModel.label(for: proposal.startIndex + proposal.duration)) · \(proposal.duration * ScheduleViewModel.blockMinutes) min")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
     }
 
     @ViewBuilder

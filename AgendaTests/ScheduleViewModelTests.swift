@@ -552,6 +552,64 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.proposeFocusSchedule(from: now, avoiding: [fullEvening]).isEmpty)
     }
 
+    func testPreviewRejectsAProposalAcrossAfternoonReservations() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        // The agenda starts at 05:00. These slots cover 17:20–18:55 with five-minute gaps.
+        let reservations = [148, 152, 156, 160, 164].map {
+            TaskItem(categoryID: category.id, startIndex: $0, duration: 3)
+        }
+        let (viewModel, cleanup) = makeViewModel(tasks: reservations)
+        defer { cleanup() }
+        viewModel.categories = [category]
+        let focus = FocusItem(name: "Proyecto", expectedMinutes: 90, proposedCategoryID: category.id, priority: 5)
+        viewModel.focuses = [focus]
+        let now = viewModel.date(for: 150) // 17:30
+        let stale = FocusScheduleProposal(focusID: focus.id, categoryID: category.id, startIndex: 152, duration: 15)
+
+        XCTAssertFalse(viewModel.focusScheduleFits([stale], from: now, reservations: reservations))
+        XCTAssertFalse(viewModel.applyFocusSchedule([stale], from: now))
+        XCTAssertEqual(viewModel.tasks, reservations)
+
+        for oneSessionPerRound in [false, true] {
+            let proposals = viewModel.proposeFocusSchedule(from: now, oneSessionPerRound: oneSessionPerRound)
+            XCTAssertEqual(proposals.first?.startIndex, 167) // 18:55
+            XCTAssertTrue(viewModel.focusScheduleFits(proposals, from: now, reservations: reservations))
+        }
+    }
+
+    func testPlannerSkipsShortGapsAndPlacesQuickFocusesInFullSessions() throws {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let reservations = [148, 152, 156, 160, 164, 171].map {
+            TaskItem(categoryID: category.id, startIndex: $0, duration: 3)
+        }
+        let (viewModel, cleanup) = makeViewModel(tasks: reservations)
+        defer { cleanup() }
+        viewModel.categories = [category]
+        viewModel.focuses = [
+            FocusItem(name: "Llamar", kind: .once),
+            FocusItem(name: "Revisar", kind: .once)
+        ]
+        let now = viewModel.date(for: 150) // 17:30
+        let avoided = [viewModel.date(for: 184)..<viewModel.dayEnd]
+
+        for oneSessionPerRound in [false, true] {
+            let proposals = viewModel.proposeFocusSchedule(from: now, maximumSessionMinutes: 25,
+                                                            oneSessionPerRound: oneSessionPerRound,
+                                                            avoiding: avoided)
+            XCTAssertEqual(proposals.map(\.startIndex), [174, 179])
+            XCTAssertEqual(proposals.map(\.duration), [5, 5])
+            XCTAssertEqual(viewModel.reflowFocusSchedule(proposals, from: now, avoiding: avoided)?.map(\.startIndex),
+                           [174, 179])
+
+            let first = try XCTUnwrap(proposals.first)
+            let stale = FocusScheduleProposal(focusID: first.focusID, categoryID: first.categoryID,
+                                              startIndex: 151, duration: 1)
+            XCTAssertFalse(viewModel.focusScheduleFits([stale], from: now, avoiding: avoided))
+            XCTAssertFalse(viewModel.applyFocusSchedule([stale], from: now, avoiding: avoided))
+            XCTAssertEqual(viewModel.tasks, reservations)
+        }
+    }
+
     func testProposeFocusScheduleDoesNotDuplicateAlreadyScheduledTime() {
         let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
         let focus = FocusItem(name: "En curso", expectedMinutes: 30, proposedCategoryID: category.id, priority: 5)
@@ -724,9 +782,9 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.category(for: quickProposal.categoryID)?.name, "Focus")
         let dailyProposal = try XCTUnwrap(roundPlan.first { $0.focusID == daily.id })
         XCTAssertEqual(dailyProposal.categoryID, category.id)
-        XCTAssertEqual([quickProposal.duration, dailyProposal.duration], [1, 1])
+        XCTAssertEqual([quickProposal.duration, dailyProposal.duration], [6, 6])
         let duplicate = FocusScheduleProposal(focusID: once.id, categoryID: quickProposal.categoryID,
-                                              startIndex: 40, duration: 1)
+                                              startIndex: 40, duration: 6)
         XCTAssertFalse(viewModel.applyFocusSchedule(roundPlan + [duplicate], from: start))
         XCTAssertEqual(viewModel.tasks, [existing])
 

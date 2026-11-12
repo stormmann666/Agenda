@@ -688,7 +688,7 @@ final class ScheduleViewModel: ObservableObject {
             if focus.kind != .project {
                 guard focus.taskIDs.isEmpty, !tasks.contains(where: { $0.focusID == focus.id }) else { return nil }
                 let category = proposedCategory ?? Self.quickFocusCategory
-                return FocusScheduleCandidate(focus: focus, categoryID: category.id, remainingBlocks: 1)
+                return FocusScheduleCandidate(focus: focus, categoryID: category.id, remainingBlocks: maximumBlocks)
             }
             guard focus.priority > 0 else { return nil }
             guard let category = proposedCategory ?? (oneSessionPerRound ? Self.quickFocusCategory : nil) else {
@@ -724,19 +724,21 @@ final class ScheduleViewModel: ObservableObject {
         // Build sessions in rounds. Every eligible focus receives one session
         // before any focus receives its second, so priority 1 work is not starved
         // by a long, higher-priority focus.
-        var pendingSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
+        typealias Session = (focusID: UUID, categoryID: UUID, duration: Int, canSplit: Bool)
+        var pendingSessions: [Session] = []
         while candidates.contains(where: { ($0.remainingBlocks ?? 0) > 0 }) {
             for index in candidates.indices {
                 guard let remaining = candidates[index].remainingBlocks, remaining > 0 else { continue }
                 let duration = min(remaining, maximumBlocks)
-                pendingSessions.append((candidates[index].focus.id, candidates[index].categoryID, duration))
+                let candidate = candidates[index]
+                pendingSessions.append((candidate.focus.id, candidate.categoryID, duration, candidate.focus.kind == .project))
                 candidates[index].remainingBlocks = remaining - duration
             }
         }
 
         // Alternate categories when the configured streak is reached and a different type is available.
         let consecutiveLimit = max(1, maximumConsecutiveSameCategory)
-        var orderedSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
+        var orderedSessions: [Session] = []
         var lastCategoryID: UUID?
         var consecutiveCount = 0
         while !pendingSessions.isEmpty {
@@ -764,6 +766,7 @@ final class ScheduleViewModel: ObservableObject {
                 var range = mutableRanges[index]
                 let duration = min(remaining, range.count)
                 guard duration > 0,
+                      session.canSplit || duration == remaining,
                       duration >= minimumBlocks || remaining < minimumBlocks else { continue }
                 proposals.append(FocusScheduleProposal(focusID: session.focusID,
                                                        categoryID: session.categoryID,
@@ -796,7 +799,8 @@ final class ScheduleViewModel: ObservableObject {
         }) {
             let candidate = candidates[index]
             let sessionBlocks = min(candidate.remainingBlocks ?? maximumBlocks, maximumBlocks)
-            guard let rangeIndex = ranges.firstIndex(where: { $0.count >= min(sessionBlocks, minimumBlocks) }) else {
+            let requiredBlocks = candidate.focus.kind == .project ? min(sessionBlocks, minimumBlocks) : sessionBlocks
+            guard let rangeIndex = ranges.firstIndex(where: { $0.count >= requiredBlocks }) else {
                 candidates.remove(at: index)
                 continue
             }
@@ -851,8 +855,9 @@ final class ScheduleViewModel: ObservableObject {
     }
 
     private func freeScheduleRanges(startingAt firstBlock: Int,
-                                    avoiding avoidedTimeRanges: [Range<Date>]) -> [Range<Int>] {
-        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+                                    avoiding avoidedTimeRanges: [Range<Date>],
+                                    reservations: [TaskItem]? = nil) -> [Range<Int>] {
+        var occupied = (reservations ?? tasks).map { $0.startIndex..<($0.startIndex + $0.duration) }
         let blockSeconds = Double(Self.blockMinutes * 60)
         for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
             let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
@@ -866,22 +871,26 @@ final class ScheduleViewModel: ObservableObject {
         var cursor = firstBlock
         for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
             guard range.upperBound > cursor else { continue }
-            if cursor < range.lowerBound {
-                freeRanges.append(cursor..<min(range.lowerBound, totalBlocks))
+            let gapEnd = min(range.lowerBound, totalBlocks)
+            if gapEnd - cursor > 1 {
+                freeRanges.append(cursor..<gapEnd)
             }
             cursor = range.upperBound
             if cursor >= totalBlocks { break }
         }
-        if cursor < totalBlocks { freeRanges.append(cursor..<totalBlocks) }
+        if totalBlocks - cursor > 1 {
+            freeRanges.append(cursor..<totalBlocks)
+        }
         return freeRanges
     }
 
     func focusScheduleFits(_ proposals: [FocusScheduleProposal],
                            from referenceDate: Date,
-                           avoiding avoidedTimeRanges: [Range<Date>] = []) -> Bool {
+                           avoiding avoidedTimeRanges: [Range<Date>] = [],
+                           reservations: [TaskItem]? = nil) -> Bool {
         guard !proposals.isEmpty else { return true }
         guard let firstBlock = blockIndex(for: referenceDate, rounding: .up) else { return false }
-        let freeRanges = freeScheduleRanges(startingAt: firstBlock, avoiding: avoidedTimeRanges)
+        let freeRanges = freeScheduleRanges(startingAt: firstBlock, avoiding: avoidedTimeRanges, reservations: reservations)
         var nextStart = firstBlock
 
         for proposal in proposals.sorted(by: { $0.startIndex < $1.startIndex }) {
@@ -914,7 +923,7 @@ final class ScheduleViewModel: ObservableObject {
             guard let focus = focus(with: proposal.focusID), !isFocusDone(focus),
                   category(for: proposal.categoryID) != nil else { return false }
             if focus.kind != .project {
-                guard proposal.duration == 1, focus.taskIDs.isEmpty,
+                guard focus.taskIDs.isEmpty,
                       scheduledFocusIDs.insert(focus.id).inserted else { return false }
             }
             let task = TaskItem(categoryID: proposal.categoryID,
