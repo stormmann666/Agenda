@@ -452,12 +452,104 @@ final class ScheduleViewModelTests: XCTestCase {
         viewModel.focuses = [focus]
         let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0))
 
-        XCTAssertTrue(viewModel.applyFocusSchedule(proposals))
+        XCTAssertTrue(viewModel.applyFocusSchedule(proposals, from: viewModel.date(for: 0)))
         XCTAssertEqual(viewModel.tasks.count, 1)
         XCTAssertEqual(viewModel.tasks.first?.duration, 6)
         XCTAssertEqual(viewModel.tasks.first?.focusID, focus.id)
         XCTAssertEqual(viewModel.focus(with: focus.id)?.taskIDs, [viewModel.tasks[0].id])
-        XCTAssertFalse(viewModel.applyFocusSchedule(proposals), "A stale preview must not overlap the boxes it already created")
+        XCTAssertFalse(viewModel.applyFocusSchedule(proposals, from: viewModel.date(for: 0)),
+                       "A stale preview must not overlap the boxes it already created")
+    }
+
+    func testPlannerStartsAtNextFreeBlockAfterCurrentTime() throws {
+        let suite = "AgendaTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: CategoryServiceStub())
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let firstBox = TaskItem(categoryID: category.id, startIndex: 13, duration: 3)
+        let secondBox = TaskItem(categoryID: category.id, startIndex: 16, duration: 3)
+        viewModel.categories = [category]
+        viewModel.tasks = [firstBox, secondBox]
+        viewModel.focuses = [
+            FocusItem(name: "Planificable", expectedMinutes: 15, proposedCategoryID: category.id, priority: 5)
+        ]
+        let blockStart = viewModel.date(for: 10)
+        let now = blockStart.addingTimeInterval(120)
+        let earlierPlan = viewModel.proposeFocusSchedule(from: blockStart, oneSessionPerRound: true)
+
+        XCTAssertEqual(earlierPlan.map(\.startIndex), [10])
+        XCTAssertFalse(viewModel.applyFocusSchedule(earlierPlan, from: now))
+        XCTAssertEqual(viewModel.tasks, [firstBox, secondBox])
+        XCTAssertEqual(viewModel.reflowFocusSchedule(earlierPlan, from: now)?.map(\.startIndex), [19])
+
+        let currentPlan = viewModel.proposeFocusSchedule(from: now, oneSessionPerRound: true)
+        XCTAssertEqual(currentPlan.map(\.startIndex), [19])
+        XCTAssertTrue(viewModel.applyFocusSchedule(currentPlan, from: now))
+        XCTAssertEqual(Array(viewModel.tasks.prefix(2)), [firstBox, secondBox])
+        XCTAssertEqual(viewModel.tasks.map(\.startIndex), [13, 16, 19])
+    }
+
+    func testPlannerRechecksReservedAndAvoidedBlocksBeforeAddingQuickFocus() throws {
+        let suite = "AgendaTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: CategoryServiceStub())
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        viewModel.categories = [category]
+        let startIndex = 12 * ScheduleViewModel.blocksPerHour
+        let endIndex = 15 * ScheduleViewModel.blocksPerHour
+        let now = viewModel.date(for: startIndex)
+        viewModel.focuses = [FocusItem(name: "Llamar", kind: .once)]
+
+        let initialPlan = viewModel.proposeFocusSchedule(from: now, oneSessionPerRound: true)
+        XCTAssertEqual(initialPlan.map(\.startIndex), [startIndex])
+        let task = try XCTUnwrap(viewModel.addTask(at: startIndex, category: category))
+        viewModel.resize(task: task, newDuration: endIndex - startIndex)
+        let reservation = try XCTUnwrap(viewModel.task(with: task.id))
+        XCTAssertFalse(viewModel.focusScheduleFits(initialPlan, from: viewModel.dayStart))
+        XCTAssertFalse(viewModel.applyFocusSchedule(initialPlan, from: now))
+        XCTAssertEqual(viewModel.tasks, [reservation])
+
+        let duringReservation = now.addingTimeInterval(60 * 60)
+        for oneSessionPerRound in [false, true] {
+            let plan = viewModel.proposeFocusSchedule(from: duringReservation, oneSessionPerRound: oneSessionPerRound)
+            XCTAssertEqual(plan.map(\.startIndex), [endIndex])
+            XCTAssertTrue(viewModel.focusScheduleFits(plan, from: viewModel.dayStart))
+        }
+
+        let nextPlan = viewModel.proposeFocusSchedule(from: now, oneSessionPerRound: true)
+        XCTAssertEqual(nextPlan.map(\.startIndex), [endIndex])
+        let avoided = viewModel.date(for: endIndex)..<viewModel.date(for: endIndex + 2)
+        XCTAssertFalse(viewModel.focusScheduleFits(nextPlan, from: viewModel.dayStart, avoiding: [avoided]))
+        XCTAssertFalse(viewModel.applyFocusSchedule(nextPlan, from: now, avoiding: [avoided]))
+        XCTAssertEqual(viewModel.tasks, [reservation])
+
+        let finalPlan = viewModel.proposeFocusSchedule(from: now, oneSessionPerRound: true, avoiding: [avoided])
+        XCTAssertEqual(finalPlan.map(\.startIndex), [endIndex + 2])
+        XCTAssertTrue(viewModel.applyFocusSchedule(finalPlan, from: now, avoiding: [avoided]))
+        XCTAssertEqual(viewModel.tasks.first, reservation)
+        XCTAssertEqual(viewModel.tasks.map(\.startIndex), [startIndex, endIndex + 2])
+    }
+
+    func testPlannerAppliesSavedAvoidedHoursToTheDayBeingPlanned() throws {
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        viewModel.focuses = [FocusItem(name: "Llamar", kind: .once)]
+        let window = AvoidedScheduleWindow(referenceDate: viewModel.dayStart, startHour: 17, endHour: 20)
+        viewModel.endCurrentDay()
+
+        let avoided = try XCTUnwrap(window.range(on: viewModel.dayStart))
+        XCTAssertEqual(avoided.lowerBound, viewModel.date(for: 12 * ScheduleViewModel.blocksPerHour))
+        XCTAssertEqual(avoided.upperBound, viewModel.date(for: 15 * ScheduleViewModel.blocksPerHour))
+        let now = avoided.lowerBound.addingTimeInterval(60 * 60)
+        let proposals = viewModel.proposeFocusSchedule(from: now, avoiding: [avoided])
+        XCTAssertEqual(proposals.map { viewModel.date(for: $0.startIndex) }, [avoided.upperBound])
+
+        let untilMidnight = AvoidedScheduleWindow(referenceDate: window.start, startMinutes: 17 * 60, endMinutes: 24 * 60)
+        let fullEvening = try XCTUnwrap(untilMidnight.range(on: viewModel.dayStart))
+        XCTAssertEqual(fullEvening.upperBound, viewModel.dayEnd)
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: now, avoiding: [fullEvening]).isEmpty)
     }
 
     func testProposeFocusScheduleDoesNotDuplicateAlreadyScheduledTime() {
@@ -509,6 +601,145 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(Array(proposals.prefix(3)).map(\.categoryID), [categoryA.id, categoryB.id, categoryA.id])
     }
 
+    func testPlannerRestartsRoundsAndDoesNotSplitOneTurnAcrossGaps() {
+        let categoryA = TaskCategory(name: "A", colorHex: "#3366FF")
+        let categoryB = TaskCategory(name: "B", colorHex: "#FF6633")
+        let blocker = TaskItem(categoryID: categoryA.id, startIndex: 3, duration: 3)
+        let (viewModel, cleanup) = makeViewModel(tasks: [blocker])
+        defer { cleanup() }
+        viewModel.categories = [categoryA, categoryB]
+        let first = FocusItem(name: "A", expectedMinutes: 90, proposedCategoryID: categoryA.id, priority: 5)
+        let second = FocusItem(name: "B", expectedMinutes: 90, proposedCategoryID: categoryB.id, priority: 4)
+        viewModel.focuses = [first, second]
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true)
+
+        XCTAssertEqual(proposals.map(\.focusID), [first.id, second.id, first.id, second.id, first.id, second.id, first.id])
+        XCTAssertEqual(proposals.map(\.startIndex), [0, 6, 12, 18, 24, 30, 36])
+        XCTAssertEqual(proposals.map(\.duration), [3, 6, 6, 6, 6, 6, 3])
+        XCTAssertTrue(viewModel.applyFocusSchedule(proposals, from: viewModel.date(for: 0)))
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true).isEmpty)
+
+        viewModel.endCurrentDay()
+
+        let nextDay = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true)
+        XCTAssertEqual(nextDay.map(\.focusID), [first.id, second.id, first.id, second.id, first.id, second.id])
+    }
+
+    func testPlannerRoundsKeepPriorityOrderAcrossCategoriesAndGaps() {
+        let work = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let home = TaskCategory(name: "Casa", colorHex: "#FF6633")
+        let blocker = TaskItem(categoryID: home.id, startIndex: 2, duration: 4)
+        let (viewModel, cleanup) = makeViewModel(tasks: [blocker])
+        defer { cleanup() }
+        viewModel.categories = [work, home]
+        let first = FocusItem(name: "A", expectedMinutes: 60, proposedCategoryID: work.id, priority: 5)
+        let second = FocusItem(name: "B", expectedMinutes: 90, proposedCategoryID: work.id, priority: 5)
+        let third = FocusItem(name: "C", expectedMinutes: 10, proposedCategoryID: home.id, priority: 4)
+        viewModel.focuses = [third, second, first]
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0),
+                                                       oneSessionPerRound: true,
+                                                       maximumConsecutiveSameCategory: 1)
+
+        XCTAssertEqual(proposals.map(\.focusID), [first.id, second.id, third.id, first.id, second.id, second.id])
+        XCTAssertEqual(proposals.map(\.startIndex), [6, 12, 18, 20, 26, 32])
+    }
+
+    func testPlannerRoundsCountCompletedBoxesBeforeRepeatingPriorityOrder() {
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        let completed = FocusItem(name: "Con sesión hecha", expectedMinutes: 90, actualMinutes: 30,
+                                  proposedCategoryID: category.id, priority: 5)
+        let pending = FocusItem(name: "Pendiente", expectedMinutes: 90, proposedCategoryID: category.id, priority: 4)
+        let existing = TaskItem(categoryID: category.id, startIndex: 0, duration: 6,
+                                isCompleted: true, focusID: completed.id)
+        let (viewModel, cleanup) = makeViewModel(tasks: [existing])
+        defer { cleanup() }
+        viewModel.categories = [category]
+        viewModel.focuses = [completed, pending]
+
+        let proposals = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true)
+        XCTAssertEqual(proposals.map(\.focusID), [pending.id, completed.id, pending.id, completed.id, pending.id])
+        XCTAssertTrue(viewModel.applyFocusSchedule(proposals, from: viewModel.date(for: 0)))
+        XCTAssertEqual(viewModel.tasks.first, existing)
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true).isEmpty)
+    }
+
+    func testPlannerRoundsUseConfiguredDurationAndFallbackTypeForIncompleteProjects() throws {
+        let suite = "AgendaTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: CategoryServiceStub())
+        let work = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        viewModel.categories = [work]
+        let noEstimate = FocusItem(name: "Sin estimación", proposedCategoryID: work.id, priority: 5)
+        let noType = FocusItem(name: "Sin tipo", expectedMinutes: 10, priority: 4)
+        let zeroEstimate = FocusItem(name: "Estimación cero", expectedMinutes: 0,
+                                     proposedCategoryID: UUID(), priority: 1)
+        let noPriority = FocusItem(name: "Sin prioridad", expectedMinutes: 30, proposedCategoryID: work.id)
+        viewModel.focuses = [zeroEstimate, noType, noPriority, noEstimate]
+
+        let start = viewModel.date(for: 0)
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: start).isEmpty)
+
+        let avoided = viewModel.date(for: 22)..<viewModel.dayEnd
+        let proposals = viewModel.proposeFocusSchedule(from: start,
+                                                       maximumSessionMinutes: 25,
+                                                       oneSessionPerRound: true,
+                                                       avoiding: [avoided])
+        XCTAssertEqual(proposals.map(\.focusID), [noEstimate.id, noType.id, zeroEstimate.id, noEstimate.id, zeroEstimate.id])
+        XCTAssertEqual(proposals.map(\.duration), [5, 2, 5, 5, 5])
+        XCTAssertEqual(proposals.map { viewModel.category(for: $0.categoryID)?.name },
+                       ["Trabajo", "Focus", "Focus", "Trabajo", "Focus"])
+        XCTAssertTrue(viewModel.applyFocusSchedule(proposals, from: start))
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: start, oneSessionPerRound: true, avoiding: [avoided]).isEmpty)
+    }
+
+    func testPlannerAddsPendingQuickFocusesAtPriorityThreeWithoutRepeatingThem() throws {
+        let suite = "AgendaTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let viewModel = ScheduleViewModel(defaults: defaults, focusService: nil, categoryService: CategoryServiceStub())
+        let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
+        viewModel.categories = [category]
+        let high = FocusItem(name: "Alta", expectedMinutes: 60, proposedCategoryID: category.id, priority: 5)
+        let medium = FocusItem(name: "Media", expectedMinutes: 30, proposedCategoryID: category.id, priority: 3)
+        let low = FocusItem(name: "Baja", expectedMinutes: 30, proposedCategoryID: category.id, priority: 2)
+        let once = FocusItem(name: "A puntual", kind: .once)
+        let daily = FocusItem(name: "B diaria", proposedCategoryID: category.id, kind: .daily)
+        let done = FocusItem(name: "Terminada", kind: .once)
+        let booked = FocusItem(name: "Ya programada", kind: .once)
+        viewModel.focuses = [low, once, high, daily, done, booked, medium]
+        viewModel.toggleQuickFocus(done)
+        let start = viewModel.date(for: 0)
+        let existing = try XCTUnwrap(viewModel.scheduleFocusAtCurrentTime(booked, referenceDate: start))
+        let expected = [high.id, once.id, daily.id, medium.id, low.id, high.id]
+
+        let standardPlan = viewModel.proposeFocusSchedule(from: start, maximumConsecutiveSameCategory: 5)
+        XCTAssertEqual(standardPlan.map(\.focusID), expected)
+        let roundPlan = viewModel.proposeFocusSchedule(from: start, oneSessionPerRound: true)
+        XCTAssertEqual(roundPlan.map(\.focusID), expected)
+
+        let quickProposal = try XCTUnwrap(roundPlan.first { $0.focusID == once.id })
+        XCTAssertEqual(viewModel.category(for: quickProposal.categoryID)?.name, "Focus")
+        let dailyProposal = try XCTUnwrap(roundPlan.first { $0.focusID == daily.id })
+        XCTAssertEqual(dailyProposal.categoryID, category.id)
+        XCTAssertEqual([quickProposal.duration, dailyProposal.duration], [1, 1])
+        let duplicate = FocusScheduleProposal(focusID: once.id, categoryID: quickProposal.categoryID,
+                                              startIndex: 40, duration: 1)
+        XCTAssertFalse(viewModel.applyFocusSchedule(roundPlan + [duplicate], from: start))
+        XCTAssertEqual(viewModel.tasks, [existing])
+
+        XCTAssertTrue(viewModel.applyFocusSchedule(roundPlan, from: start))
+        XCTAssertTrue(viewModel.proposeFocusSchedule(from: start, oneSessionPerRound: true).isEmpty)
+        let dailyTask = try XCTUnwrap(viewModel.tasks.first { $0.focusID == daily.id })
+        viewModel.toggleCompletion(for: dailyTask)
+        XCTAssertTrue(viewModel.completedQuickFocusesToday.contains { $0.id == daily.id })
+        viewModel.endCurrentDay()
+        let nextDay = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), oneSessionPerRound: true)
+        XCTAssertEqual(nextDay.filter { $0.focusID == daily.id }.count, 1)
+    }
+
     func testPlannerIncludesFocusAfterPriorityChangesFromZeroToOne() {
         let category = TaskCategory(name: "Trabajo", colorHex: "#3366FF")
         let (viewModel, cleanup) = makeViewModel(tasks: [])
@@ -558,7 +789,7 @@ final class ScheduleViewModelTests: XCTestCase {
         let original = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), maximumSessionMinutes: 30)
         let reversed = Array(original.reversed())
 
-        let reflowed = viewModel.reflowFocusSchedule(reversed, breakMinutes: 10)
+        let reflowed = viewModel.reflowFocusSchedule(reversed, from: viewModel.date(for: 0), breakMinutes: 10)
 
         XCTAssertEqual(reflowed?.map(\.focusID), reversed.map(\.focusID))
         XCTAssertEqual(reflowed?.map(\.startIndex), [0, 8])
@@ -576,7 +807,7 @@ final class ScheduleViewModelTests: XCTestCase {
         let original = viewModel.proposeFocusSchedule(from: viewModel.date(for: 0), maximumSessionMinutes: 15)
         let remaining = [original[0], original[2]]
 
-        let reflowed = viewModel.reflowFocusSchedule(remaining, breakMinutes: 5)
+        let reflowed = viewModel.reflowFocusSchedule(remaining, from: viewModel.date(for: 0), breakMinutes: 5)
 
         XCTAssertEqual(reflowed?.map(\.focusID), remaining.map(\.focusID))
         XCTAssertEqual(reflowed?.map(\.startIndex), [0, 4])

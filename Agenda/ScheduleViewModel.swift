@@ -230,6 +230,14 @@ struct FocusScheduleProposal: Identifiable, Hashable {
     }
 }
 
+private struct FocusScheduleCandidate {
+    let focus: FocusItem
+    let categoryID: UUID
+    var remainingBlocks: Int?
+
+    var priority: Int { focus.kind == .project ? focus.priority : 3 }
+}
+
 final class ScheduleViewModel: ObservableObject {
     static let blockMinutes = 5
     private let categoryService: TaskCategoryRemoteService
@@ -659,80 +667,74 @@ final class ScheduleViewModel: ObservableObject {
         return task(with: newTask.id)
     }
 
-    /// Builds a non-destructive plan for the pending, estimable focuses.
+    /// Builds a non-destructive plan for pending focuses.
     /// Existing boxes are never moved and already scheduled, unfinished focus time
     /// is deducted so running the planner repeatedly does not duplicate work.
     func proposeFocusSchedule(from referenceDate: Date = Date(),
                               minimumSessionMinutes: Int = 15,
                               maximumSessionMinutes: Int = 30,
+                              oneSessionPerRound: Bool = false,
                               maximumConsecutiveSameCategory: Int = 2,
                               breakMinutes: Int = 0,
                               avoiding avoidedTimeRanges: [Range<Date>] = []) -> [FocusScheduleProposal] {
-        guard let firstBlock = blockIndex(for: referenceDate), firstBlock < totalBlocks else { return [] }
+        guard let firstBlock = blockIndex(for: referenceDate, rounding: .up) else { return [] }
         let minimumBlocks = max(1, Int(ceil(Double(minimumSessionMinutes) / Double(Self.blockMinutes))))
         let maximumBlocks = max(minimumBlocks, Int(ceil(Double(maximumSessionMinutes) / Double(Self.blockMinutes))))
         let breakBlocks = max(0, Int(ceil(Double(breakMinutes) / Double(Self.blockMinutes))))
-        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
-        for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
-            let blockSeconds = Double(Self.blockMinutes * 60)
-            let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
-            let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
-            let avoidedStart = max(0, min(totalBlocks, rawStart))
-            let avoidedEnd = max(0, min(totalBlocks, rawEnd))
-            if avoidedStart < avoidedEnd {
-                occupied.append(avoidedStart..<avoidedEnd)
-            }
-        }
-        var freeRanges: [Range<Int>] = []
-        var cursor = firstBlock
 
-        for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
-            guard range.upperBound > firstBlock else { continue }
-            if cursor < range.lowerBound {
-                freeRanges.append(cursor..<min(range.lowerBound, totalBlocks))
+        var candidates = focuses.compactMap { focus -> FocusScheduleCandidate? in
+            guard !isFocusDone(focus) else { return nil }
+            let proposedCategory = focus.proposedCategoryID.flatMap { category(for: $0) }
+            if focus.kind != .project {
+                guard focus.taskIDs.isEmpty, !tasks.contains(where: { $0.focusID == focus.id }) else { return nil }
+                let category = proposedCategory ?? Self.quickFocusCategory
+                return FocusScheduleCandidate(focus: focus, categoryID: category.id, remainingBlocks: 1)
             }
-            cursor = max(cursor, range.upperBound)
-            if cursor >= totalBlocks { break }
-        }
-        if cursor < totalBlocks {
-            freeRanges.append(cursor..<totalBlocks)
-        }
-
-        var candidates = focuses.compactMap { focus -> (focus: FocusItem, remaining: Int)? in
-            guard focus.kind == .project, !(focus.isCompleted ?? false),
-                  focus.priority > 0,
-                  let categoryID = focus.proposedCategoryID,
-                  category(for: categoryID) != nil,
-                  let expected = focus.expectedMinutes,
-                  expected > 0 else { return nil }
+            guard focus.priority > 0 else { return nil }
+            guard let category = proposedCategory ?? (oneSessionPerRound ? Self.quickFocusCategory : nil) else {
+                return nil
+            }
+            guard let expected = focus.expectedMinutes, expected > 0 else {
+                return oneSessionPerRound
+                    ? FocusScheduleCandidate(focus: focus, categoryID: category.id, remainingBlocks: nil)
+                    : nil
+            }
             let scheduledMinutes = tasks
                 .filter { $0.focusID == focus.id && !$0.isCompleted }
                 .reduce(0) { $0 + $1.duration * Self.blockMinutes }
             let remainingMinutes = expected - (focus.actualMinutes ?? 0) - scheduledMinutes
             guard remainingMinutes > 0 else { return nil }
-            return (focus, Int(ceil(Double(remainingMinutes) / Double(Self.blockMinutes))))
+            let remainingBlocks = Int(ceil(Double(remainingMinutes) / Double(Self.blockMinutes)))
+            return FocusScheduleCandidate(focus: focus, categoryID: category.id, remainingBlocks: remainingBlocks)
         }
         .sorted { lhs, rhs in
-            if lhs.0.priority != rhs.0.priority { return lhs.0.priority > rhs.0.priority }
-            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
-            return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            let lhsBlocks = lhs.remainingBlocks ?? maximumBlocks
+            let rhsBlocks = rhs.remainingBlocks ?? maximumBlocks
+            if lhsBlocks != rhsBlocks { return lhsBlocks < rhsBlocks }
+            return lhs.focus.name.localizedCaseInsensitiveCompare(rhs.focus.name) == .orderedAscending
+        }
+
+        let freeRanges = freeScheduleRanges(startingAt: firstBlock, avoiding: avoidedTimeRanges)
+        if oneSessionPerRound {
+            return proposeFocusRounds(candidates, in: freeRanges, minimumBlocks: minimumBlocks,
+                                      maximumBlocks: maximumBlocks, breakBlocks: breakBlocks)
         }
 
         // Build sessions in rounds. Every eligible focus receives one session
         // before any focus receives its second, so priority 1 work is not starved
         // by a long, higher-priority focus.
         var pendingSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
-        while candidates.contains(where: { $0.remaining > 0 }) {
-            for index in candidates.indices where candidates[index].remaining > 0 {
-                guard let categoryID = candidates[index].focus.proposedCategoryID else { continue }
-                let duration = min(candidates[index].remaining, maximumBlocks)
-                pendingSessions.append((candidates[index].focus.id, categoryID, duration))
-                candidates[index].remaining -= duration
+        while candidates.contains(where: { ($0.remainingBlocks ?? 0) > 0 }) {
+            for index in candidates.indices {
+                guard let remaining = candidates[index].remainingBlocks, remaining > 0 else { continue }
+                let duration = min(remaining, maximumBlocks)
+                pendingSessions.append((candidates[index].focus.id, candidates[index].categoryID, duration))
+                candidates[index].remainingBlocks = remaining - duration
             }
         }
 
-        // Reorder only when the configured category streak is reached. If no
-        // alternative category exists, keep planning instead of leaving gaps.
+        // Alternate categories when the configured streak is reached and a different type is available.
         let consecutiveLimit = max(1, maximumConsecutiveSameCategory)
         var orderedSessions: [(focusID: UUID, categoryID: UUID, duration: Int)] = []
         var lastCategoryID: UUID?
@@ -777,34 +779,59 @@ final class ScheduleViewModel: ObservableObject {
         return proposals
     }
 
+    private func proposeFocusRounds(_ sortedCandidates: [FocusScheduleCandidate],
+                                    in freeRanges: [Range<Int>],
+                                    minimumBlocks: Int,
+                                    maximumBlocks: Int,
+                                    breakBlocks: Int) -> [FocusScheduleProposal] {
+        var candidates = sortedCandidates
+        var ranges = freeRanges[...]
+        var sessionCounts = Dictionary(grouping: tasks.compactMap(\.focusID), by: { $0 }).mapValues(\.count)
+        var proposals: [FocusScheduleProposal] = []
+
+        // Projects with fewer sessions get their turn first. The candidate order
+        // breaks ties by priority and includes blocks already on today's agenda.
+        while !ranges.isEmpty, let index = candidates.indices.min(by: {
+            sessionCounts[candidates[$0].focus.id, default: 0] < sessionCounts[candidates[$1].focus.id, default: 0]
+        }) {
+            let candidate = candidates[index]
+            let sessionBlocks = min(candidate.remainingBlocks ?? maximumBlocks, maximumBlocks)
+            guard let rangeIndex = ranges.firstIndex(where: { $0.count >= min(sessionBlocks, minimumBlocks) }) else {
+                candidates.remove(at: index)
+                continue
+            }
+            let range = ranges[rangeIndex]
+            let duration = min(sessionBlocks, range.count)
+            proposals.append(FocusScheduleProposal(focusID: candidate.focus.id,
+                                                   categoryID: candidate.categoryID,
+                                                   startIndex: range.lowerBound,
+                                                   duration: duration))
+            let nextStart = min(range.upperBound, range.lowerBound + duration + breakBlocks)
+            ranges = ranges[rangeIndex...]
+            ranges[rangeIndex] = nextStart..<range.upperBound
+
+            sessionCounts[candidate.focus.id, default: 0] += 1
+            if let remaining = candidate.remainingBlocks {
+                if remaining == duration {
+                    candidates.remove(at: index)
+                } else {
+                    candidates[index].remainingBlocks = remaining - duration
+                }
+            }
+        }
+        return proposals
+    }
+
     /// Reassigns start times to an explicitly ordered preview while preserving
     /// every proposal's focus, category and duration.
     func reflowFocusSchedule(_ orderedProposals: [FocusScheduleProposal],
+                             from referenceDate: Date = Date(),
                              breakMinutes: Int = 0,
                              avoiding avoidedTimeRanges: [Range<Date>] = []) -> [FocusScheduleProposal]? {
-        guard let firstBlock = orderedProposals.map(\.startIndex).min() else { return [] }
+        guard !orderedProposals.isEmpty else { return [] }
+        guard let firstBlock = blockIndex(for: referenceDate, rounding: .up) else { return nil }
         let breakBlocks = max(0, Int(ceil(Double(breakMinutes) / Double(Self.blockMinutes))))
-        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
-        let blockSeconds = Double(Self.blockMinutes * 60)
-        for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
-            let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
-            let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
-            let start = max(0, min(totalBlocks, rawStart))
-            let end = max(0, min(totalBlocks, rawEnd))
-            if start < end { occupied.append(start..<end) }
-        }
-
-        var freeRanges: [Range<Int>] = []
-        var freeCursor = firstBlock
-        for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
-            guard range.upperBound > firstBlock else { continue }
-            if freeCursor < range.lowerBound {
-                freeRanges.append(freeCursor..<min(range.lowerBound, totalBlocks))
-            }
-            freeCursor = max(freeCursor, range.upperBound)
-        }
-        if freeCursor < totalBlocks { freeRanges.append(freeCursor..<totalBlocks) }
-
+        let freeRanges = freeScheduleRanges(startingAt: firstBlock, avoiding: avoidedTimeRanges)
         var result: [FocusScheduleProposal] = []
         var scheduleCursor = firstBlock
         for proposal in orderedProposals {
@@ -823,35 +850,84 @@ final class ScheduleViewModel: ObservableObject {
         return result
     }
 
+    private func freeScheduleRanges(startingAt firstBlock: Int,
+                                    avoiding avoidedTimeRanges: [Range<Date>]) -> [Range<Int>] {
+        var occupied = tasks.map { $0.startIndex..<($0.startIndex + $0.duration) }
+        let blockSeconds = Double(Self.blockMinutes * 60)
+        for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
+            let rawStart = Int(floor(avoidedTimeRange.lowerBound.timeIntervalSince(dayStart) / blockSeconds))
+            let rawEnd = Int(ceil(avoidedTimeRange.upperBound.timeIntervalSince(dayStart) / blockSeconds))
+            let start = max(0, min(totalBlocks, rawStart))
+            let end = max(0, min(totalBlocks, rawEnd))
+            if start < end { occupied.append(start..<end) }
+        }
+
+        var freeRanges: [Range<Int>] = []
+        var cursor = firstBlock
+        for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            guard range.upperBound > cursor else { continue }
+            if cursor < range.lowerBound {
+                freeRanges.append(cursor..<min(range.lowerBound, totalBlocks))
+            }
+            cursor = range.upperBound
+            if cursor >= totalBlocks { break }
+        }
+        if cursor < totalBlocks { freeRanges.append(cursor..<totalBlocks) }
+        return freeRanges
+    }
+
+    func focusScheduleFits(_ proposals: [FocusScheduleProposal],
+                           from referenceDate: Date,
+                           avoiding avoidedTimeRanges: [Range<Date>] = []) -> Bool {
+        guard !proposals.isEmpty else { return true }
+        guard let firstBlock = blockIndex(for: referenceDate, rounding: .up) else { return false }
+        let freeRanges = freeScheduleRanges(startingAt: firstBlock, avoiding: avoidedTimeRanges)
+        var nextStart = firstBlock
+
+        for proposal in proposals.sorted(by: { $0.startIndex < $1.startIndex }) {
+            guard proposal.startIndex >= nextStart,
+                  proposal.startIndex < totalBlocks,
+                  proposal.duration > 0,
+                  proposal.duration <= totalBlocks - proposal.startIndex else { return false }
+            let endIndex = proposal.startIndex + proposal.duration
+            guard freeRanges.contains(where: {
+                $0.contains(proposal.startIndex) && endIndex <= $0.upperBound
+            }) else { return false }
+            nextStart = endIndex
+        }
+        return true
+    }
+
     /// Applies a previously generated plan only if every proposed interval is
     /// still valid. This prevents a stale preview from overwriting newer boxes.
     @discardableResult
-    func applyFocusSchedule(_ proposals: [FocusScheduleProposal]) -> Bool {
-        guard !proposals.isEmpty else { return false }
-        var stagedTasks = tasks
+    func applyFocusSchedule(_ proposals: [FocusScheduleProposal],
+                            from referenceDate: Date = Date(),
+                            avoiding avoidedTimeRanges: [Range<Date>] = []) -> Bool {
+        guard !proposals.isEmpty,
+              focusScheduleFits(proposals, from: referenceDate, avoiding: avoidedTimeRanges) else { return false }
+        var newTasks: [TaskItem] = []
         var createdByFocus: [UUID: [UUID]] = [:]
+        var scheduledFocusIDs = Set(tasks.compactMap(\.focusID))
 
         for proposal in proposals.sorted(by: { $0.startIndex < $1.startIndex }) {
-            guard focuses.contains(where: { $0.id == proposal.focusID && $0.kind == .project && !($0.isCompleted ?? false) }),
-                  category(for: proposal.categoryID) != nil,
-                  proposal.duration > 0,
-                  proposal.startIndex >= 0,
-                  proposal.startIndex + proposal.duration <= totalBlocks else { return false }
-            let overlaps = stagedTasks.contains { task in
-                proposal.startIndex < task.startIndex + task.duration &&
-                proposal.startIndex + proposal.duration > task.startIndex
+            guard let focus = focus(with: proposal.focusID), !isFocusDone(focus),
+                  category(for: proposal.categoryID) != nil else { return false }
+            if focus.kind != .project {
+                guard proposal.duration == 1, focus.taskIDs.isEmpty,
+                      scheduledFocusIDs.insert(focus.id).inserted else { return false }
             }
-            guard !overlaps else { return false }
             let task = TaskItem(categoryID: proposal.categoryID,
                                 startIndex: proposal.startIndex,
                                 duration: proposal.duration,
                                 focusID: proposal.focusID)
-            stagedTasks.append(task)
+            newTasks.append(task)
             createdByFocus[proposal.focusID, default: []].append(task.id)
         }
 
         mutateTasks { tasks in
-            tasks = stagedTasks.sorted { $0.startIndex < $1.startIndex }
+            tasks.append(contentsOf: newTasks)
+            tasks.sort { $0.startIndex < $1.startIndex }
         }
         mutateFocuses { focuses in
             for index in focuses.indices {
@@ -1385,13 +1461,10 @@ final class ScheduleViewModel: ObservableObject {
         return nil
     }
 
-    private func blockIndex(for date: Date) -> Int? {
+    private func blockIndex(for date: Date, rounding: FloatingPointRoundingRule = .down) -> Int? {
         let blockSeconds = Double(Self.blockMinutes) * 60
-        let diff = date.timeIntervalSince(dayStart)
-        if diff < 0 {
-            return 0
-        }
-        let index = Int(diff / blockSeconds)
+        let diff = max(0, date.timeIntervalSince(dayStart))
+        let index = Int((diff / blockSeconds).rounded(rounding))
         guard index < totalBlocks else { return nil }
         return index
     }

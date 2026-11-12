@@ -1149,23 +1149,19 @@ private extension Color {
     }
 }
 
-private struct AvoidedScheduleWindow: Identifiable, Equatable {
+struct AvoidedScheduleWindow: Identifiable, Equatable {
     let id: UUID
     var start: Date
     var end: Date
 
     init(id: UUID = UUID(), referenceDate: Date = Date(), startHour: Int = 13, endHour: Int = 14) {
-        self.id = id
-        start = Calendar.current.date(bySettingHour: startHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate
-        end = Calendar.current.date(bySettingHour: endHour, minute: 0, second: 0, of: referenceDate) ?? referenceDate.addingTimeInterval(3600)
+        self.init(id: id, referenceDate: referenceDate, startMinutes: startHour * 60, endMinutes: endHour * 60)
     }
 
     init(id: UUID = UUID(), referenceDate: Date = Date(), startMinutes: Int, endMinutes: Int) {
         self.id = id
-        let calendar = Calendar.current
-        let day = calendar.startOfDay(for: referenceDate)
-        start = calendar.date(byAdding: .minute, value: startMinutes, to: day) ?? day
-        end = calendar.date(byAdding: .minute, value: endMinutes, to: day) ?? day
+        start = Self.date(on: referenceDate, at: startMinutes) ?? referenceDate
+        end = Self.date(on: referenceDate, at: endMinutes) ?? referenceDate
     }
 
     var startMinutes: Int {
@@ -1174,8 +1170,28 @@ private struct AvoidedScheduleWindow: Identifiable, Equatable {
     }
 
     var endMinutes: Int {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: end)
+        let calendar = Calendar.current
+        if end > start, !calendar.isDate(start, inSameDayAs: end), end == calendar.startOfDay(for: end) {
+            return 24 * 60
+        }
+        let components = calendar.dateComponents([.hour, .minute], from: end)
         return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    func range(on day: Date) -> Range<Date>? {
+        guard startMinutes < endMinutes,
+              let startOnDay = Self.date(on: day, at: startMinutes),
+              let endOnDay = Self.date(on: day, at: endMinutes),
+              startOnDay < endOnDay else { return nil }
+        return startOnDay..<endOnDay
+    }
+
+    private static func date(on day: Date, at minutes: Int) -> Date? {
+        let calendar = Calendar.current
+        if minutes == 24 * 60 {
+            return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))
+        }
+        return calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
     }
 }
 
@@ -1254,9 +1270,11 @@ struct FocusManagerView: View {
     @State private var recentlyScheduledFocusID: UUID?
     @State private var showingPriorityAdjuster = false
     @State private var scheduleProposals: [FocusScheduleProposal] = []
+    @State private var schedulePreviewDay: Date?
     @State private var showingSchedulePreview = false
     @State private var avoidedTimeWindows: [AvoidedScheduleWindow] = []
     @State private var focusSessionMinutes = 30
+    @AppStorage("agenda.autoFocus.oneSessionPerDay") private var oneSessionPerRound = false
     @State private var maximumConsecutiveFocusTypes = 2
     @State private var breakMinutes = 0
     @State private var scheduleReorderMessage: String?
@@ -1502,16 +1520,27 @@ struct FocusManagerView: View {
             }
             .sheet(isPresented: $showingSchedulePreview) {
                 NavigationStack {
+                    let proposals = scheduleProposals
+                    let previewDay = schedulePreviewDay
+                    let previewFits = previewDay == viewModel.dayStart &&
+                        viewModel.focusScheduleFits(proposals, from: viewModel.dayStart, avoiding: avoidedScheduleRanges)
                     List {
+                        let now = Date()
+                        let reservations = viewModel.tasks
+                            .filter { viewModel.date(for: $0.startIndex + $0.duration) > now }
+                            .sorted { $0.startIndex < $1.startIndex }
                         Section("Configuración") {
+                            Toggle("Una sesión por proyecto antes de repetir", isOn: $oneSessionPerRound)
                             Picker("Tiempo por tarea", selection: $focusSessionMinutes) {
                                 ForEach([15, 25, 30, 45, 60, 90], id: \.self) { minutes in
                                     Text("\(minutes) min").tag(minutes)
                                 }
                             }
-                            Picker("Máximo del mismo tipo seguidos", selection: $maximumConsecutiveFocusTypes) {
-                                ForEach(1...5, id: \.self) { count in
-                                    Text("\(count)").tag(count)
+                            if !oneSessionPerRound {
+                                Picker("Máximo del mismo tipo seguidos", selection: $maximumConsecutiveFocusTypes) {
+                                    ForEach(1...5, id: \.self) { count in
+                                        Text("\(count)").tag(count)
+                                    }
                                 }
                             }
                             Picker("Descanso entre actividades", selection: $breakMinutes) {
@@ -1547,7 +1576,7 @@ struct FocusManagerView: View {
                             } label: {
                                 Label("Añadir horario a evitar", systemImage: "plus.circle")
                             }
-                            Text("Solo se incluyen focuses con prioridad entre 1 y 5. Los boxes existentes siempre se respetan.")
+                            Text("Se incluyen proyectos con prioridad del 1 al 5 y focuses rápidos con prioridad 3. Los bloques existentes se respetan.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Button {
@@ -1556,21 +1585,40 @@ struct FocusManagerView: View {
                                 Label("Actualizar propuesta", systemImage: "arrow.clockwise")
                             }
                         }
-                        Section("Propuesta") {
+                        Section("Propuesta · \((previewDay ?? viewModel.dayStart).formatted(date: .abbreviated, time: .omitted))") {
                             if let scheduleReorderMessage {
                                 Text(scheduleReorderMessage)
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }
-                            if scheduleProposals.isEmpty {
-                                Text("No hay focuses prioritarios que puedan colocarse con esta configuración.")
+                            if !previewFits {
+                                Text("Actualizando la propuesta según los bloques reservados…")
+                                    .foregroundStyle(.secondary)
+                            } else if proposals.isEmpty {
+                                Text("No hay focuses pendientes que quepan hoy con esta configuración.")
                                     .foregroundStyle(.secondary)
                             } else {
-                                ForEach(scheduleProposals) { proposal in
+                                ForEach(proposals) { proposal in
                                     scheduleProposalRow(proposal)
                                 }
                                 .onMove(perform: moveScheduleProposals)
                                 .onDelete(perform: deleteScheduleProposals)
+                            }
+                        }
+                        if !reservations.isEmpty {
+                            Section("Ya reservados en la agenda") {
+                                ForEach(reservations) { task in
+                                    let focusName = task.focusID.flatMap { viewModel.focus(with: $0)?.name }
+                                    let categoryName = viewModel.category(for: task.categoryID)?.name
+                                    let start = viewModel.label(for: task.startIndex)
+                                    let end = viewModel.label(for: task.startIndex + task.duration)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(focusName ?? categoryName ?? "Bloque reservado")
+                                        Text("\(start)–\(end)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1585,13 +1633,14 @@ struct FocusManagerView: View {
                             Button("Añadir a la agenda") {
                                 applyAutomaticSchedule()
                             }
-                            .disabled(scheduleProposals.isEmpty || hasInvalidAvoidedWindow)
+                            .disabled(!previewFits || proposals.isEmpty || hasInvalidAvoidedWindow)
                         }
                         ToolbarItem(placement: .bottomBar) {
                             EditButton()
                         }
                     }
                     .onChange(of: focusSessionMinutes) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: oneSessionPerRound) { refreshAutomaticSchedule() }
                     .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
                     .onChange(of: avoidedTimeWindows) { _ in
@@ -1599,7 +1648,13 @@ struct FocusManagerView: View {
                         refreshAutomaticSchedule()
                     }
                     .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
+                    .onChange(of: viewModel.categories) { refreshAutomaticSchedule() }
+                    .onChange(of: viewModel.tasks) { refreshAutomaticSchedule() }
                     .onChange(of: viewModel.dayStart) { _ in refreshAutomaticSchedule() }
+                    .onAppear { refreshAutomaticSchedule() }
+                    .onChange(of: previewFits) { _, fits in
+                        if !fits { refreshAutomaticSchedule() }
+                    }
                 }
             }
             .alert("Focus", isPresented: Binding(
@@ -1650,16 +1705,19 @@ struct FocusManagerView: View {
     }
 
     private func prepareAutomaticSchedule() {
-        refreshAutomaticSchedule()
+        schedulePreviewDay = nil
         showingSchedulePreview = true
     }
 
     private func refreshAutomaticSchedule() {
         scheduleReorderMessage = nil
+        schedulePreviewDay = viewModel.dayStart
         scheduleProposals = viewModel.proposeFocusSchedule(maximumSessionMinutes: focusSessionMinutes,
+                                                           oneSessionPerRound: oneSessionPerRound,
                                                            maximumConsecutiveSameCategory: maximumConsecutiveFocusTypes,
                                                            breakMinutes: breakMinutes,
                                                            avoiding: avoidedScheduleRanges)
+            .sorted { $0.startIndex < $1.startIndex }
     }
 
     private func moveScheduleProposals(from offsets: IndexSet, to destination: Int) {
@@ -1696,14 +1754,11 @@ struct FocusManagerView: View {
     }
 
     private var avoidedScheduleRanges: [Range<Date>] {
-        avoidedTimeWindows.compactMap { window in
-            guard window.start < window.end else { return nil }
-            return window.start..<window.end
-        }
+        avoidedTimeWindows.compactMap { $0.range(on: viewModel.dayStart) }
     }
 
     private var hasInvalidAvoidedWindow: Bool {
-        avoidedTimeWindows.contains { $0.end <= $0.start }
+        avoidedTimeWindows.contains { $0.range(on: viewModel.dayStart) == nil }
     }
 
     private static var scheduleDefaults: UserDefaults {
@@ -1734,12 +1789,13 @@ struct FocusManagerView: View {
     }
 
     private func applyAutomaticSchedule() {
-        if viewModel.applyFocusSchedule(scheduleProposals) {
+        if schedulePreviewDay == viewModel.dayStart,
+           viewModel.applyFocusSchedule(scheduleProposals, avoiding: avoidedScheduleRanges) {
             showingSchedulePreview = false
             scheduleProposals = []
         } else {
-            showingSchedulePreview = false
-            focusActionMessage = "La agenda ha cambiado. Vuelve a generar la propuesta para evitar solapamientos."
+            refreshAutomaticSchedule()
+            scheduleReorderMessage = "La hora o la agenda han cambiado. Revisa la propuesta actualizada."
         }
     }
 
