@@ -5,6 +5,7 @@ import WidgetKit
 struct AgendaWidgetBundle: WidgetBundle {
     var body: some Widget {
         if #available(iOS 26.0, *) {
+            AgendaBlockLiveActivity()
             AgendaWidgetLiveActivity()
         }
     }

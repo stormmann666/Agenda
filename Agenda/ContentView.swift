@@ -276,7 +276,7 @@ struct DayTimelineView: View {
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
-                        Toggle("Avisar al terminar cada bloque", isOn: $blockAlertsEnabled)
+                        Toggle("Avisar al empezar y terminar cada bloque", isOn: $blockAlertsEnabled)
                     } label: {
                         Image(systemName: blockAlertsEnabled ? "bell.fill" : "bell.slash")
                     }

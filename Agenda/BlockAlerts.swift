@@ -3,6 +3,7 @@ import OSLog
 import SwiftUI
 import UserNotifications
 #if os(iOS) && !targetEnvironment(macCatalyst)
+import ActivityKit
 import AlarmKit
 import UIKit
 #endif
@@ -43,6 +44,40 @@ struct BlockAlert: Equatable {
     }
 }
 
+struct BlockNotification {
+    enum Event {
+        case start, end
+    }
+
+    static let identifierPrefix = "agenda.block."
+    let alert: BlockAlert
+    let event: Event
+
+    var date: Date { event == .start ? alert.start : alert.end }
+    var title: String { event == .start ? "Empieza: \(alert.taskName)" : alert.title }
+    var identifier: String {
+        let eventPrefix = event == .start ? "start." : ""
+        return Self.identifierPrefix + eventPrefix + alert.id.uuidString
+    }
+
+    static func upcoming(for alerts: [BlockAlert], after now: Date,
+                         nativeAlarmIDs: Set<UUID>?, existingIDs: Set<String>,
+                         liveActivityIDs: Set<UUID> = []) -> [Self] {
+        alerts.flatMap { alert -> [Self] in
+            let start = Self(alert: alert, event: .start)
+            let end = Self(alert: alert, event: .end)
+            // If AlarmKit cannot report its alarms, retain any existing fallback.
+            let needsEnd = nativeAlarmIDs.map { !$0.contains(alert.id) }
+                ?? existingIDs.contains(end.identifier)
+            // A scheduled Live Activity presents its own alert when it starts.
+            let starts = liveActivityIDs.contains(alert.id) ? [] : [start]
+            return needsEnd ? starts + [end] : starts
+        }
+        .filter { $0.date > now }
+        .sorted { $0.date < $1.date }
+    }
+}
+
 extension ScheduleViewModel {
     var blockAlerts: [BlockAlert] {
         tasks.compactMap { task in
@@ -61,7 +96,6 @@ extension ScheduleViewModel {
 final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
     static let enabledKey = "agenda.blockAlerts.enabled"
 
-    private nonisolated static let notificationPrefix = "agenda.block."
     private let center = UNUserNotificationCenter.current()
     private let log = Logger(subsystem: "com.ams.Agenda2", category: "BlockAlerts")
     private var pending: (alerts: [BlockAlert], enabled: Bool)?
@@ -99,31 +133,41 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        notification.request.identifier.hasPrefix(Self.notificationPrefix) ? [.banner, .sound, .list] : []
+        notification.request.identifier.hasPrefix(BlockNotification.identifierPrefix) ? [.banner, .sound, .list] : []
     }
 
     private func synchronize(_ alerts: [BlockAlert], enabled: Bool) async {
         let desired = enabled ? alerts : []
         let now = Date()
         let upcoming = desired.filter { $0.end > now }.sorted { $0.end < $1.end }
-        var nativeIDs: Set<UUID> = []
+        var nativeIDs: Set<UUID>? = []
+        var liveActivityIDs: Set<UUID> = []
 
         #if os(iOS) && !targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
-            guard let scheduled = await synchronizeAlarms(upcoming, retaining: Set(desired.map(\.id)), enabled: enabled),
-                  pending == nil else { return }
-            nativeIDs = scheduled
+            liveActivityIDs = await synchronizeLiveActivities(upcoming)
+            guard pending == nil else { return }
+            nativeIDs = await synchronizeAlarms(upcoming, retaining: Set(desired.map(\.id)),
+                                                liveActivityIDs: liveActivityIDs, enabled: enabled)
         }
         #endif
 
-        let fallback = upcoming.filter { !nativeIDs.contains($0.id) }
-        await synchronizeNotifications(fallback)
+        guard pending == nil else { return }
+        await synchronizeNotifications(upcoming, nativeAlarmIDs: nativeIDs, liveActivityIDs: liveActivityIDs)
     }
 
-    private func synchronizeNotifications(_ alerts: [BlockAlert]) async {
+    private func synchronizeNotifications(_ alerts: [BlockAlert], nativeAlarmIDs: Set<UUID>?,
+                                          liveActivityIDs: Set<UUID>) async {
+        let existing = await center.pendingNotificationRequests()
+        guard pending == nil else { return }
+        let existingIDs = Set(existing.map(\.identifier))
+        let blockIDs = Set(existingIDs.filter { $0.hasPrefix(BlockNotification.identifierPrefix) })
+        let upcoming = BlockNotification.upcoming(for: alerts, after: Date(),
+                                                  nativeAlarmIDs: nativeAlarmIDs, existingIDs: blockIDs,
+                                                  liveActivityIDs: liveActivityIDs)
         let settings = await center.notificationSettings()
         var authorized = [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus)
-        if settings.authorizationStatus == .notDetermined && !alerts.isEmpty && pending == nil {
+        if settings.authorizationStatus == .notDetermined && !upcoming.isEmpty && pending == nil {
             do {
                 authorized = try await center.requestAuthorization(options: [.alert, .sound])
             } catch {
@@ -132,29 +176,26 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
         }
         guard pending == nil else { return }
 
-        // Keep the earliest reminders when the schedule exceeds the system's pending request limit.
+        let availableSlots = max(0, 64 - (existingIDs.count - blockIDs.count))
         let now = Date()
-        let desired = authorized ? Array(alerts.lazy.filter { $0.end > now }.prefix(64)) : []
-        let desiredIDs = Set(desired.map { Self.notificationPrefix + $0.id.uuidString })
-        let existingIDs = Set(await center.pendingNotificationRequests()
-            .map(\.identifier)
-            .filter { $0.hasPrefix(Self.notificationPrefix) })
-        guard pending == nil else { return }
-        center.removePendingNotificationRequests(withIdentifiers: Array(existingIDs.subtracting(desiredIDs)))
+        let desired = authorized ? Array(upcoming.lazy.filter { $0.date > now }.prefix(availableSlots)) : []
+        let desiredIDs = Set(desired.map(\.identifier))
+        center.removePendingNotificationRequests(withIdentifiers: Array(blockIDs.subtracting(desiredIDs)))
 
-        for alert in desired {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        for notification in desired {
             guard pending == nil else { return }
-            let id = Self.notificationPrefix + alert.id.uuidString
-            guard !existingIDs.contains(id), alert.end > Date() else { continue }
+            guard !blockIDs.contains(notification.identifier), notification.date > Date() else { continue }
             let content = UNMutableNotificationContent()
-            content.title = alert.title
+            content.title = notification.title
             content.sound = .default
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = .gmt
-            let date = calendar.dateComponents([.timeZone, .year, .month, .day, .hour, .minute, .second], from: alert.end)
+            let date = calendar.dateComponents([.timeZone, .year, .month, .day, .hour, .minute, .second],
+                                               from: notification.date)
             let trigger = UNCalendarNotificationTrigger(dateMatching: date, repeats: false)
             do {
-                try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+                try await center.add(UNNotificationRequest(identifier: notification.identifier,
+                                                           content: content, trigger: trigger))
             } catch {
                 log.error("Could not schedule block notification: \(error.localizedDescription)")
             }
@@ -163,8 +204,57 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
 
     #if os(iOS) && !targetEnvironment(macCatalyst)
     @available(iOS 26.0, *)
+    private func synchronizeLiveActivities(_ upcoming: [BlockAlert]) async -> Set<UUID> {
+        typealias BlockActivity = Activity<BlockActivityAttributes>
+        let upcomingIDs = Set(upcoming.map(\.id))
+        let activitiesEnabled = ActivityAuthorizationInfo().areActivitiesEnabled
+        var liveIDs: Set<UUID> = []
+        for activity in BlockActivity.activities {
+            let id = activity.attributes.blockID
+            let state = activity.activityState
+            if activitiesEnabled, upcomingIDs.contains(id), !liveIDs.contains(id),
+               state == .pending || state == .active {
+                liveIDs.insert(id)
+            } else {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+        guard activitiesEnabled, UIApplication.shared.applicationState == .active else { return liveIDs }
+
+        for alert in upcoming where !liveIDs.contains(alert.id) {
+            guard pending == nil else { break }
+            let now = Date()
+            guard alert.end > now else { continue }
+            let attributes = BlockActivityAttributes(blockID: alert.id, taskName: alert.taskName)
+            let content = ActivityContent(
+                state: BlockActivityAttributes.ContentState(interval: DateInterval(start: alert.start, end: alert.end)),
+                staleDate: alert.end,
+                relevanceScore: alert.start.timeIntervalSinceReferenceDate
+            )
+            do {
+                if alert.start > now {
+                    let notification = BlockNotification(alert: alert, event: .start)
+                    let announcement = AlertConfiguration(
+                        title: LocalizedStringResource(stringLiteral: notification.title),
+                        body: "Consulta el tiempo restante en la pantalla bloqueada.",
+                        sound: .default
+                    )
+                    _ = try BlockActivity.request(attributes: attributes, content: content, style: .standard,
+                                                  alertConfiguration: announcement, start: alert.start)
+                } else {
+                    _ = try BlockActivity.request(attributes: attributes, content: content)
+                }
+                liveIDs.insert(alert.id)
+            } catch {
+                log.error("Could not start or schedule block Live Activity: \(error.localizedDescription)")
+            }
+        }
+        return liveIDs
+    }
+
+    @available(iOS 26.0, *)
     private func synchronizeAlarms(_ upcoming: [BlockAlert], retaining desiredIDs: Set<UUID>,
-                                   enabled: Bool) async -> Set<UUID>? {
+                                   liveActivityIDs: Set<UUID>, enabled: Bool) async -> Set<UUID>? {
         let manager = AlarmManager.shared
         if enabled && manager.authorizationState == .notDetermined {
             do {
@@ -183,15 +273,24 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
             log.error("Could not read scheduled block alarms: \(error.localizedDescription)")
             return nil
         }
-        for alarm in existing where !desiredIDs.contains(alarm.id) {
+        let upcomingIDs = Set(upcoming.map(\.id))
+        var scheduled: Set<UUID> = []
+        for alarm in existing {
+            let keep = desiredIDs.contains(alarm.id)
+            let hasCountdown = alarm.countdownDuration != nil
+            let needsCountdown = !liveActivityIDs.contains(alarm.id)
+            if keep && (alarm.state == .alerting || !upcomingIDs.contains(alarm.id) || hasCountdown == needsCountdown) {
+                scheduled.insert(alarm.id)
+                continue
+            }
             do {
                 try manager.cancel(id: alarm.id)
             } catch {
+                if keep { scheduled.insert(alarm.id) }
                 log.error("Could not cancel block alarm: \(error.localizedDescription)")
             }
         }
 
-        var scheduled = Set(existing.map(\.id)).intersection(desiredIDs)
         for alert in upcoming where !scheduled.contains(alert.id) {
             guard pending == nil else { return nil }
 
@@ -203,10 +302,11 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
                 presentation = .init(title: title, stopButton: AlarmButton(
                     text: "Detener", textColor: .white, systemImageName: "stop.fill"))
             }
+            let usesLiveActivity = liveActivityIDs.contains(alert.id)
             let attributes = AlarmAttributes(
                 presentation: AlarmPresentation(
                     alert: presentation,
-                    countdown: .init(title: LocalizedStringResource(stringLiteral: alert.taskName))
+                    countdown: usesLiveActivity ? nil : .init(title: LocalizedStringResource(stringLiteral: alert.taskName))
                 ),
                 metadata: BlockAlarmMetadata(taskName: alert.taskName,
                                              interval: DateInterval(start: alert.start, end: alert.end)),
@@ -214,13 +314,17 @@ final class BlockAlertScheduler: NSObject, UNUserNotificationCenterDelegate {
             )
             guard let timing = alert.alarmTiming(at: Date()) else { continue }
             let configuration: AlarmManager.AlarmConfiguration<BlockAlarmMetadata>
-            switch timing {
-            case let .scheduled(end, duration):
-                configuration = .init(countdownDuration: .init(preAlert: duration, postAlert: nil),
-                                      schedule: .fixed(end),
-                                      attributes: attributes)
-            case let .immediate(duration):
-                configuration = .timer(duration: duration, attributes: attributes)
+            if usesLiveActivity {
+                configuration = .alarm(schedule: .fixed(alert.end), attributes: attributes)
+            } else {
+                switch timing {
+                case let .scheduled(end, duration):
+                    configuration = .init(countdownDuration: .init(preAlert: duration, postAlert: nil),
+                                          schedule: .fixed(end),
+                                          attributes: attributes)
+                case let .immediate(duration):
+                    configuration = .timer(duration: duration, attributes: attributes)
+                }
             }
             do {
                 _ = try await manager.schedule(id: alert.id, configuration: configuration)

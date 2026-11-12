@@ -325,6 +325,39 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertNil(alert.alarmTiming(at: end))
     }
 
+    func testBlockStartNotificationIsIndependentOfTheEndAlarm() {
+        let start = Date(timeIntervalSinceReferenceDate: 3_600)
+        let end = start.addingTimeInterval(600)
+        let alert = BlockAlert(taskID: UUID(), taskName: "Facturas", start: start, end: end)
+        let beforeStart = start.addingTimeInterval(-60)
+
+        let withNativeAlarm = BlockNotification.upcoming(for: [alert], after: beforeStart,
+                                                          nativeAlarmIDs: [alert.id], existingIDs: [])
+        XCTAssertEqual(withNativeAlarm.map(\.title), ["Empieza: Facturas"])
+        XCTAssertEqual(withNativeAlarm.map(\.date), [start])
+
+        let withoutNativeAlarm = BlockNotification.upcoming(for: [alert], after: beforeStart,
+                                                             nativeAlarmIDs: [], existingIDs: [])
+        XCTAssertEqual(withoutNativeAlarm.map(\.date), [start, end])
+        XCTAssertEqual(Set(withoutNativeAlarm.map(\.identifier)).count, 2)
+
+        let withUnknownAlarmStatus = BlockNotification.upcoming(
+            for: [alert], after: beforeStart, nativeAlarmIDs: nil,
+            existingIDs: Set(withoutNativeAlarm.map(\.identifier))
+        )
+        XCTAssertEqual(withUnknownAlarmStatus.map(\.date), [start, end])
+
+        let alreadyStarted = BlockNotification.upcoming(for: [alert], after: start,
+                                                        nativeAlarmIDs: [], existingIDs: [])
+        XCTAssertEqual(alreadyStarted.map(\.date), [end])
+
+        let withScheduledActivity = BlockNotification.upcoming(
+            for: [alert], after: beforeStart, nativeAlarmIDs: [], existingIDs: [],
+            liveActivityIDs: [alert.id]
+        )
+        XCTAssertEqual(withScheduledActivity.map(\.date), [end])
+    }
+
     func testImportQuickFocusesUsesOnlyTrailingSiempreAsDailyMarker() throws {
         let suite = "QuickFocusImport-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
