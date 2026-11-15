@@ -1105,6 +1105,17 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func clearTasks(from date: Date) {
+        guard let cutoff = blockIndex(for: date, rounding: .up) else { return }
+        mutateTasks { tasks in
+            tasks.removeAll { $0.startIndex >= cutoff }
+            for index in tasks.indices {
+                let blocksBeforeCutoff = cutoff - tasks[index].startIndex
+                tasks[index].duration = min(tasks[index].duration, blocksBeforeCutoff)
+            }
+        }
+    }
+
     func shiftTasks(from startIndex: Int, by delta: Int) {
         guard delta > 0 else { return }
         mutateTasks { tasks in

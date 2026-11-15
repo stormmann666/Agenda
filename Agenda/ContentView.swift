@@ -102,7 +102,7 @@ struct DayTimelineView: View {
     @State private var resizingTaskID: UUID?
     @State private var resizingPreviewDuration: Int = 1
     @State private var scheduleError: String?
-    @State private var isClearingAllTasks = false
+    @State private var showingClearTasksConfirmation = false
     @State private var moveModeTaskID: UUID?
     @State private var selectedTaskID: UUID?
     @State private var liveTime = Date()
@@ -237,13 +237,6 @@ struct DayTimelineView: View {
             } message: {
                 Text("¿Quieres borrar esta tarea?")
             }
-            .alert("¿Borrar todas las tareas?", isPresented: $isClearingAllTasks) {
-                Button("Eliminar todas", role: .destructive) {
-                    viewModel.clearAllTasks()
-                    selectedTaskID = nil
-                }
-                Button("Cancelar", role: .cancel) { }
-            }
             .alert("Terminar día", isPresented: $showingEndDayConfirmation) {
                 Button("Terminar", role: .destructive) {
                     viewModel.endCurrentDay()
@@ -299,11 +292,26 @@ struct DayTimelineView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        isClearingAllTasks = true
+                        showingClearTasksConfirmation = true
                     } label: {
                         Image(systemName: "trash")
                     }
+                    .accessibilityLabel("Borrar tareas")
                     .disabled(!viewModel.isCurrentDay(selectedDate) || viewModel.tasks.isEmpty)
+                    .confirmationDialog("Borrar tareas del día", isPresented: $showingClearTasksConfirmation,
+                                        titleVisibility: .visible) {
+                        Button("Borrar todo", role: .destructive) {
+                            viewModel.clearAllTasks()
+                            selectedTaskID = nil
+                        }
+                        Button("Borrar desde ahora", role: .destructive) {
+                            viewModel.clearTasks(from: Date())
+                            if let selectedTaskID, viewModel.task(with: selectedTaskID) == nil {
+                                self.selectedTaskID = nil
+                            }
+                        }
+                        Button("Cancelar", role: .cancel) { }
+                    }
                 }
             }
         }

@@ -871,6 +871,24 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(reflowed?.map(\.startIndex), [0, 4])
     }
 
+    func testClearTasksFromNowKeepsPastAndShortensCurrentTask() {
+        let past = makeTask(start: 0, duration: 2)
+        let current = makeTask(start: 2, duration: 4)
+        let future = makeTask(start: 6, duration: 2)
+        let (viewModel, cleanup) = makeViewModel(tasks: [past, current, future])
+        defer { cleanup() }
+
+        viewModel.clearTasks(from: viewModel.date(for: 3).addingTimeInterval(60))
+
+        var shortened = current
+        shortened.duration = 2
+        XCTAssertEqual(viewModel.tasks, [past, shortened])
+
+        viewModel.clearTasks(from: viewModel.date(for: current.startIndex))
+
+        XCTAssertEqual(viewModel.tasks, [past])
+    }
+
     /*
      func testAdjustTaskDurationClampsWithinBounds() {
      let initialTask = makeTask(start: 0, duration: 4)
