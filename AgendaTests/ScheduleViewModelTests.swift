@@ -871,6 +871,112 @@ final class ScheduleViewModelTests: XCTestCase {
         XCTAssertEqual(reflowed?.map(\.startIndex), [0, 4])
     }
 
+    func testPauseCatchesUpAfterReopeningAndDoesNotApplyTheSameTimeTwice() throws {
+        let suite = "PauseRestore-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let startedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 11, day: 16, hour: 16, minute: 55
+        )))
+        let schedule = ScheduleViewModel(defaults: defaults, focusService: nil, now: startedAt)
+        let firstBlocked = 12 * ScheduleViewModel.blocksPerHour
+        let firstAllowed = 13 * ScheduleViewModel.blocksPerHour
+        schedule.saveAvoidedTimeWindows([
+            AvoidedScheduleWindow(referenceDate: startedAt, startHour: 17, endHour: 18)
+        ])
+        let past = makeTask(start: firstBlocked - 3, duration: 1)
+        var task = makeTask(start: firstBlocked - 1, duration: 1)
+        schedule.tasks = [past, task]
+
+        schedule.startPause(at: startedAt)
+        task.startIndex = firstAllowed
+        XCTAssertEqual(schedule.tasks, [past, task])
+
+        let reopenedAt = startedAt.addingTimeInterval(20 * 60)
+        let reopened = ScheduleViewModel(defaults: defaults, focusService: nil, now: reopenedAt)
+        task.startIndex += 3
+        XCTAssertTrue(reopened.isPaused)
+        XCTAssertEqual(reopened.tasks, [past, task])
+
+        reopened.updatePause(at: reopenedAt)
+        XCTAssertEqual(reopened.tasks, [past, task])
+
+        reopened.resumeSchedule(at: reopenedAt)
+        let afterResume = ScheduleViewModel(defaults: defaults, focusService: nil,
+                                            now: reopenedAt.addingTimeInterval(5 * 60))
+        XCTAssertFalse(afterResume.isPaused)
+        XCTAssertEqual(afterResume.tasks, [past, task])
+    }
+
+    func testPauseDoesNotCarryIntoTheNextDay() throws {
+        let suite = "PauseRollover-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let startedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 11, day: 16, hour: 5
+        )))
+        let schedule = ScheduleViewModel(defaults: defaults, focusService: nil, now: startedAt)
+        schedule.tasks = [makeTask(start: 0, duration: 1)]
+        schedule.startPause(at: startedAt)
+
+        let nextDay = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: startedAt))
+        let reopened = ScheduleViewModel(defaults: defaults, focusService: nil, now: nextDay)
+
+        XCTAssertFalse(reopened.isPaused)
+        XCTAssertTrue(reopened.tasks.isEmpty)
+        XCTAssertTrue(reopened.dayLogs.contains { $0.tasks.first?.startIndex == 1 })
+    }
+
+    func testPauseMovesTasksInOrderAroundSavedAvoidedWindows() {
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        let firstBlocked = 12 * ScheduleViewModel.blocksPerHour
+        let firstAllowed = 14 * ScheduleViewModel.blocksPerHour
+        viewModel.saveAvoidedTimeWindows([
+            AvoidedScheduleWindow(referenceDate: viewModel.dayStart, startHour: 17, endHour: 18),
+            AvoidedScheduleWindow(referenceDate: viewModel.dayStart, startHour: 18, endHour: 19)
+        ])
+        let past = makeTask(start: firstBlocked - 5, duration: 2)
+        var current = makeTask(start: firstBlocked - 3, duration: 3)
+        var following = makeTask(start: firstBlocked + 1, duration: 1)
+        var later = makeTask(start: firstAllowed + 10, duration: 2)
+        viewModel.tasks = [past, current, following, later]
+
+        viewModel.postponeTasks(from: viewModel.date(for: firstBlocked - 2), by: 1)
+
+        current.startIndex = firstAllowed
+        following.startIndex = firstAllowed + current.duration
+        later.startIndex += 1
+        XCTAssertEqual(viewModel.tasks, [past, current, following, later])
+    }
+
+    func testPauseDeletesTasksThatNoLongerFit() {
+        let (viewModel, cleanup) = makeViewModel(tasks: [])
+        defer { cleanup() }
+        let end = viewModel.totalBlocks
+        viewModel.saveAvoidedTimeWindows([
+            AvoidedScheduleWindow(referenceDate: viewModel.dayStart, startMinutes: 23 * 60 + 40, endMinutes: 23 * 60 + 50)
+        ])
+        var first = makeTask(start: 2, duration: 1)
+        let tooLong = makeTask(start: end - 8, duration: 4)
+        var shorter = makeTask(start: end - 4, duration: 1)
+        let last = makeTask(start: end - 1, duration: 1)
+        viewModel.tasks = [first, tooLong, shorter, last]
+        let now = viewModel.date(for: first.startIndex)
+
+        viewModel.postponeTasks(from: now, by: 1)
+
+        first.startIndex += 1
+        shorter.startIndex = end - 2
+        XCTAssertEqual(viewModel.tasks, [first, shorter])
+
+        viewModel.postponeTasks(from: now, by: 1)
+
+        first.startIndex += 1
+        shorter.startIndex += 1
+        XCTAssertEqual(viewModel.tasks, [first, shorter])
+    }
+
     func testClearTasksFromNowKeepsPastAndShortensCurrentTask() {
         let past = makeTask(start: 0, duration: 2)
         let current = makeTask(start: 2, duration: 4)

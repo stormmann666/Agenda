@@ -131,6 +131,10 @@ struct WidgetSnapshot {
 }
 
 struct WidgetDataSource {
+    private struct PausedSchedule: Decodable {
+        let tasks: [StoredTask]
+    }
+
     private let defaults = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
@@ -175,11 +179,12 @@ struct WidgetDataSource {
     }
 
     private func loadTasks() -> [StoredTask] {
-        guard let data = defaults.data(forKey: tasksKey),
-              let decoded = try? JSONDecoder().decode([StoredTask].self, from: data) else {
-            return []
+        guard let data = defaults.data(forKey: tasksKey) else { return [] }
+        let decoder = JSONDecoder()
+        if let pausedSchedule = try? decoder.decode(PausedSchedule.self, from: data) {
+            return pausedSchedule.tasks
         }
-        return decoded
+        return (try? decoder.decode([StoredTask].self, from: data)) ?? []
     }
 
     private func loadCategories() -> [UUID: String] {

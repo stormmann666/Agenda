@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(BlockAlertScheduler.enabledKey) private var blockAlertsEnabled = false
     private let dayTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    private let pauseTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
@@ -39,7 +40,9 @@ struct ContentView: View {
         }
         .task(id: scenePhase) {
             if scenePhase == .active {
-                viewModel.advanceDayIfNeeded()
+                let now = Date()
+                viewModel.advanceDayIfNeeded(at: now)
+                viewModel.updatePause(at: now)
                 updateBlockAlerts()
                 await viewModel.refreshFromRemote()
             }
@@ -49,6 +52,11 @@ struct ContentView: View {
         .onReceive(dayTimer) { date in
             if scenePhase == .active {
                 viewModel.advanceDayIfNeeded(at: date)
+            }
+        }
+        .onReceive(pauseTimer) { date in
+            if scenePhase == .active, viewModel.isPaused {
+                withAnimation { viewModel.updatePause(at: date) }
             }
         }
     }
@@ -106,10 +114,6 @@ struct DayTimelineView: View {
     @State private var moveModeTaskID: UUID?
     @State private var selectedTaskID: UUID?
     @State private var liveTime = Date()
-    @State private var isPaused = false
-    @State private var pauseReferenceDate: Date?
-    @State private var pauseTaskID: UUID?
-    @State private var pauseAccumulatedBlocks: Int = 0
     @State private var timelineRefreshID = UUID()
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showingEndDayConfirmation = false
@@ -193,7 +197,11 @@ struct DayTimelineView: View {
             }
             .onReceive(liveTimer) { date in
                 liveTime = date
-                handlePauseProgress(at: date)
+            }
+            .onChange(of: viewModel.tasks) {
+                if let selectedTaskID, viewModel.task(with: selectedTaskID) == nil {
+                    self.selectedTaskID = nil
+                }
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -274,6 +282,9 @@ struct DayTimelineView: View {
                         Image(systemName: blockAlertsEnabled ? "bell.fill" : "bell.slash")
                     }
                     .accessibilityLabel("Avisos de bloques")
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    pauseButton
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -707,16 +718,22 @@ Sin focus: \(unfocused)
         }
     }
 
-    private func handlePauseProgress(at currentDate: Date) { }
-
-    private func currentTask(at date: Date) -> TaskItem? {
-        let blocks = viewModel.timelineBlocks(for: selectedDate)
-        return blocks.first { block in
-            guard let task = block.task else { return false }
-            let startDate = viewModel.date(for: block.index, on: selectedDate)
-            let endDate = viewModel.date(for: block.index + task.duration, on: selectedDate)
-            return date >= startDate && date < endDate
-        }?.task
+    private var pauseButton: some View {
+        let isPaused = viewModel.isPaused
+        return Button {
+            withAnimation {
+                if viewModel.isPaused {
+                    viewModel.resumeSchedule()
+                } else {
+                    viewModel.startPause()
+                }
+            }
+        } label: {
+            Image(systemName: isPaused ? "play.circle.fill" : "pause.circle")
+        }
+        .accessibilityLabel(isPaused ? "Reanudar agenda" : "Pausar agenda")
+        .disabled(!viewModel.isCurrentDay(selectedDate)
+                  || (!isPaused && !viewModel.hasTasksToPostpone(at: liveTime)))
     }
 
     private func resizeGesture(for task: TaskItem) -> some Gesture {
@@ -1157,57 +1174,6 @@ private extension Color {
     }
 }
 
-struct AvoidedScheduleWindow: Identifiable, Equatable {
-    let id: UUID
-    var start: Date
-    var end: Date
-
-    init(id: UUID = UUID(), referenceDate: Date = Date(), startHour: Int = 13, endHour: Int = 14) {
-        self.init(id: id, referenceDate: referenceDate, startMinutes: startHour * 60, endMinutes: endHour * 60)
-    }
-
-    init(id: UUID = UUID(), referenceDate: Date = Date(), startMinutes: Int, endMinutes: Int) {
-        self.id = id
-        start = Self.date(on: referenceDate, at: startMinutes) ?? referenceDate
-        end = Self.date(on: referenceDate, at: endMinutes) ?? referenceDate
-    }
-
-    var startMinutes: Int {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: start)
-        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
-    }
-
-    var endMinutes: Int {
-        let calendar = Calendar.current
-        if end > start, !calendar.isDate(start, inSameDayAs: end), end == calendar.startOfDay(for: end) {
-            return 24 * 60
-        }
-        let components = calendar.dateComponents([.hour, .minute], from: end)
-        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
-    }
-
-    func range(on day: Date) -> Range<Date>? {
-        guard startMinutes < endMinutes,
-              let startOnDay = Self.date(on: day, at: startMinutes),
-              let endOnDay = Self.date(on: day, at: endMinutes),
-              startOnDay < endOnDay else { return nil }
-        return startOnDay..<endOnDay
-    }
-
-    private static func date(on day: Date, at minutes: Int) -> Date? {
-        let calendar = Calendar.current
-        if minutes == 24 * 60 {
-            return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))
-        }
-        return calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
-    }
-}
-
-private struct PersistedAvoidedScheduleWindow: Codable {
-    let startMinutes: Int
-    let endMinutes: Int
-}
-
 private struct QuickFocusRow: View {
     let focus: FocusItem
     @ObservedObject var viewModel: ScheduleViewModel
@@ -1260,7 +1226,6 @@ private struct FocusScheduleView: View {
     @Binding var focusSessionMinutes: Int
     @Binding var maximumConsecutiveFocusTypes: Int
     @Binding var breakMinutes: Int
-    let saveAvoidedTimeWindows: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("agenda.autoFocus.oneSessionPerDay") private var oneSessionPerRound = false
@@ -1395,7 +1360,7 @@ private struct FocusScheduleView: View {
             .onChange(of: maximumConsecutiveFocusTypes) { _ in refreshAutomaticSchedule() }
             .onChange(of: breakMinutes) { _ in refreshAutomaticSchedule() }
             .onChange(of: avoidedTimeWindows) { _ in
-                saveAvoidedTimeWindows()
+                viewModel.saveAvoidedTimeWindows(avoidedTimeWindows)
                 refreshAutomaticSchedule()
             }
             .onChange(of: viewModel.focuses) { _ in refreshAutomaticSchedule() }
@@ -1522,12 +1487,9 @@ struct FocusManagerView: View {
     @State private var maximumConsecutiveFocusTypes = 2
     @State private var breakMinutes = 0
 
-    private static let avoidedWindowsStorageKey = "agenda.autoFocus.avoidedWindows"
-    private static let appGroupID = "group.com.antoniomunoz.Agenda"
-
     init(viewModel: ScheduleViewModel) {
         _viewModel = ObservedObject(initialValue: viewModel)
-        _avoidedTimeWindows = State(initialValue: Self.loadAvoidedTimeWindows())
+        _avoidedTimeWindows = State(initialValue: viewModel.loadAvoidedTimeWindows())
     }
 
     var body: some View {
@@ -1766,8 +1728,7 @@ struct FocusManagerView: View {
                                   avoidedTimeWindows: $avoidedTimeWindows,
                                   focusSessionMinutes: $focusSessionMinutes,
                                   maximumConsecutiveFocusTypes: $maximumConsecutiveFocusTypes,
-                                  breakMinutes: $breakMinutes,
-                                  saveAvoidedTimeWindows: saveAvoidedTimeWindows)
+                                  breakMinutes: $breakMinutes)
             }
             .alert("Focus", isPresented: Binding(
                 get: { focusActionMessage != nil },
@@ -1813,33 +1774,6 @@ struct FocusManagerView: View {
                            proposedCategoryID: newFocusProposedCategoryID,
                            priority: newFocusPriority)
         resetFocusForm()
-    }
-
-    private static var scheduleDefaults: UserDefaults {
-        UserDefaults(suiteName: appGroupID) ?? .standard
-    }
-
-    private static func loadAvoidedTimeWindows() -> [AvoidedScheduleWindow] {
-        guard let data = scheduleDefaults.data(forKey: avoidedWindowsStorageKey),
-              let stored = try? JSONDecoder().decode([PersistedAvoidedScheduleWindow].self, from: data) else {
-            return []
-        }
-        return stored.compactMap { item in
-            guard item.startMinutes >= 0,
-                  item.endMinutes <= 24 * 60,
-                  item.startMinutes < item.endMinutes else { return nil }
-            return AvoidedScheduleWindow(startMinutes: item.startMinutes, endMinutes: item.endMinutes)
-        }
-    }
-
-    private func saveAvoidedTimeWindows() {
-        let stored = avoidedTimeWindows.compactMap { window -> PersistedAvoidedScheduleWindow? in
-            guard window.start < window.end else { return nil }
-            return PersistedAvoidedScheduleWindow(startMinutes: window.startMinutes,
-                                                  endMinutes: window.endMinutes)
-        }
-        guard let data = try? JSONEncoder().encode(stored) else { return }
-        Self.scheduleDefaults.set(data, forKey: Self.avoidedWindowsStorageKey)
     }
 
     @ViewBuilder

@@ -230,6 +230,67 @@ struct FocusScheduleProposal: Identifiable, Hashable {
     }
 }
 
+struct AvoidedScheduleWindow: Identifiable, Equatable {
+    let id: UUID
+    var start: Date
+    var end: Date
+
+    init(id: UUID = UUID(), referenceDate: Date = Date(), startHour: Int = 13, endHour: Int = 14) {
+        self.init(id: id, referenceDate: referenceDate, startMinutes: startHour * 60, endMinutes: endHour * 60)
+    }
+
+    init(id: UUID = UUID(), referenceDate: Date = Date(), startMinutes: Int, endMinutes: Int) {
+        self.id = id
+        start = Self.date(on: referenceDate, at: startMinutes) ?? referenceDate
+        end = Self.date(on: referenceDate, at: endMinutes) ?? referenceDate
+    }
+
+    var startMinutes: Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: start)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    var endMinutes: Int {
+        let calendar = Calendar.current
+        if end > start, !calendar.isDate(start, inSameDayAs: end), end == calendar.startOfDay(for: end) {
+            return 24 * 60
+        }
+        let components = calendar.dateComponents([.hour, .minute], from: end)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    func range(on day: Date) -> Range<Date>? {
+        guard startMinutes < endMinutes,
+              let startOnDay = Self.date(on: day, at: startMinutes),
+              let endOnDay = Self.date(on: day, at: endMinutes),
+              startOnDay < endOnDay else { return nil }
+        return startOnDay..<endOnDay
+    }
+
+    private static func date(on day: Date, at minutes: Int) -> Date? {
+        let calendar = Calendar.current
+        if minutes == 24 * 60 {
+            return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))
+        }
+        return calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day)
+    }
+}
+
+private struct PersistedAvoidedScheduleWindow: Codable {
+    let startMinutes: Int
+    let endMinutes: Int
+}
+
+private struct SchedulePause: Codable {
+    let startedAt: Date
+    var appliedBlocks: Int
+}
+
+private struct PausedSchedule: Codable {
+    let tasks: [TaskItem]
+    let pause: SchedulePause
+}
+
 private struct FocusScheduleCandidate {
     let focus: FocusItem
     let categoryID: UUID
@@ -255,12 +316,15 @@ final class ScheduleViewModel: ObservableObject {
     @Published private(set) var categoriesLastRefreshedAt: Date?
     private var categoryRefreshVersion = 0
     @Published var tasks: [TaskItem]
+    @Published private var pause: SchedulePause?
     @Published var dayLogs: [ScheduleDayLog]
     @Published var focuses: [FocusItem]
 
     @Published private(set) var dayStart: Date
     var dayEnd: Date
+    var isPaused: Bool { pause != nil }
 
+    private let avoidedWindowsStorageKey = "agenda.autoFocus.avoidedWindows"
     private let wakeUpKey = "agenda.wakeUpAnchor"
     private let tasksKey = "agenda.tasks.storage"
     private let categoriesKey = "agenda.categories.storage"
@@ -283,7 +347,8 @@ final class ScheduleViewModel: ObservableObject {
     init(defaults: UserDefaults = UserDefaults(suiteName: ScheduleViewModel.appGroupID) ?? .standard,
          calendar: Calendar = Calendar.current,
          focusService: FocusRemoteService? = SupabaseFocusService.shared,
-         categoryService: TaskCategoryRemoteService? = SupabaseTaskCategoryService.shared) {
+         categoryService: TaskCategoryRemoteService? = SupabaseTaskCategoryService.shared,
+         now: Date = Date()) {
         //en focuservice cabiamos el DB o local
         
         
@@ -301,7 +366,6 @@ final class ScheduleViewModel: ObservableObject {
         dayLogs = []
         focuses = []
 
-        let now = Date()
         let candidateStart = Self.dailyStart(for: now, calendar: self.calendar)
         let stored = defaults.object(forKey: wakeUpKey) as? Date
         var previousDayStart: Date?
@@ -321,7 +385,10 @@ final class ScheduleViewModel: ObservableObject {
         categories = loadCategories()
         updateFocusServiceResolver()
         //focuses = loadCachedFocuses()
-        var loadedTasks = loadTasks()
+        let taskData = defaults.data(forKey: tasksKey)
+        let pausedSchedule = taskData.flatMap { try? JSONDecoder().decode(PausedSchedule.self, from: $0) }
+        let storedTasks = pausedSchedule?.tasks ?? taskData.flatMap { try? JSONDecoder().decode([TaskItem].self, from: $0) }
+        var loadedTasks = normalizeLoadedTasks(storedTasks ?? [])
         var loadedLogs = loadDayLogs()
 
         let storedBlockVersion: Int
@@ -358,6 +425,10 @@ final class ScheduleViewModel: ObservableObject {
         defaults.set(initialStart, forKey: wakeUpKey)
         focuses = quickFocusStorage.loadFocuses()
         cleanupFocusAssignments()
+        if previousDayStart == nil {
+            pause = pausedSchedule?.pause
+            updatePause(at: now)
+        }
     }
 
     var totalBlocks: Int {
@@ -461,6 +532,7 @@ final class ScheduleViewModel: ObservableObject {
 
     private func startNewDay(at nextStart: Date) {
         archiveDay(date: dayStart, tasks: tasks)
+        pause = nil
         mutateTasks { tasks in
             tasks.removeAll()
         }
@@ -856,7 +928,8 @@ final class ScheduleViewModel: ObservableObject {
 
     private func freeScheduleRanges(startingAt firstBlock: Int,
                                     avoiding avoidedTimeRanges: [Range<Date>],
-                                    reservations: [TaskItem]? = nil) -> [Range<Int>] {
+                                    reservations: [TaskItem]? = nil,
+                                    minimumGap: Int = 2) -> [Range<Int>] {
         var occupied = (reservations ?? tasks).map { $0.startIndex..<($0.startIndex + $0.duration) }
         let blockSeconds = Double(Self.blockMinutes * 60)
         for avoidedTimeRange in avoidedTimeRanges where !avoidedTimeRange.isEmpty {
@@ -872,13 +945,13 @@ final class ScheduleViewModel: ObservableObject {
         for range in occupied.sorted(by: { $0.lowerBound < $1.lowerBound }) {
             guard range.upperBound > cursor else { continue }
             let gapEnd = min(range.lowerBound, totalBlocks)
-            if gapEnd - cursor > 1 {
+            if gapEnd - cursor >= minimumGap {
                 freeRanges.append(cursor..<gapEnd)
             }
             cursor = range.upperBound
             if cursor >= totalBlocks { break }
         }
-        if totalBlocks - cursor > 1 {
+        if totalBlocks - cursor >= minimumGap {
             freeRanges.append(cursor..<totalBlocks)
         }
         return freeRanges
@@ -1116,6 +1189,69 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    func hasTasksToPostpone(at date: Date) -> Bool {
+        guard date >= dayStart, let block = blockIndex(for: date) else { return false }
+        return tasks.contains { $0.startIndex + $0.duration > block }
+    }
+
+    func startPause(at date: Date = Date()) {
+        guard pause == nil, hasTasksToPostpone(at: date) else { return }
+        pause = SchedulePause(startedAt: date, appliedBlocks: 0)
+        updatePause(at: date)
+    }
+
+    func resumeSchedule(at date: Date = Date()) {
+        guard pause != nil else { return }
+        updatePause(at: date)
+        pause = nil
+        saveTasks()
+    }
+
+    func updatePause(at date: Date = Date()) {
+        guard var activePause = pause else { return }
+        guard activePause.startedAt >= dayStart, activePause.startedAt < dayEnd, date < dayEnd else {
+            pause = nil
+            saveTasks()
+            return
+        }
+        let blockSeconds = Double(Self.blockMinutes * 60)
+        let elapsed = max(0, date.timeIntervalSince(activePause.startedAt))
+        let elapsedBlocks = max(1, Int(ceil(elapsed / blockSeconds)))
+        let remainingBlocks = elapsedBlocks - activePause.appliedBlocks
+        guard remainingBlocks > 0 else { return }
+        let startedAt = activePause.startedAt
+        activePause.appliedBlocks = elapsedBlocks
+        pause = activePause
+        postponeTasks(from: startedAt, by: remainingBlocks)
+    }
+
+    func postponeTasks(from date: Date, by blocks: Int) {
+        guard blocks > 0, date >= dayStart, let firstBlock = blockIndex(for: date) else { return }
+        let pastTasks = tasks.filter { $0.startIndex + $0.duration <= firstBlock }
+        let avoidedRanges = loadAvoidedTimeWindows().compactMap { $0.range(on: dayStart) }
+        let freeRanges = freeScheduleRanges(startingAt: 0, avoiding: avoidedRanges,
+                                            reservations: pastTasks, minimumGap: 1)
+        var upcoming = tasks.filter { $0.startIndex + $0.duration > firstBlock }
+            .sorted { $0.startIndex < $1.startIndex }
+
+        // Skipping a forbidden interval at each step gives the same result after reopening.
+        for _ in 0..<blocks {
+            if upcoming.isEmpty { break }
+            var nextStart = 0
+            upcoming = upcoming.compactMap { task in
+                var shifted = task
+                let earliestStart = max(task.startIndex + 1, nextStart)
+                guard let range = freeRanges.first(where: {
+                    max(earliestStart, $0.lowerBound) + task.duration <= $0.upperBound
+                }) else { return nil }
+                shifted.startIndex = max(earliestStart, range.lowerBound)
+                nextStart = shifted.startIndex + task.duration
+                return shifted
+            }
+        }
+        mutateTasks { $0 = (pastTasks + upcoming).sorted { $0.startIndex < $1.startIndex } }
+    }
+
     func shiftTasks(from startIndex: Int, by delta: Int) {
         guard delta > 0 else { return }
         mutateTasks { tasks in
@@ -1233,6 +1369,29 @@ final class ScheduleViewModel: ObservableObject {
         applyFocusChanges(updated)
     }
 
+    func loadAvoidedTimeWindows() -> [AvoidedScheduleWindow] {
+        guard let data = defaults.data(forKey: avoidedWindowsStorageKey),
+              let stored = try? JSONDecoder().decode([PersistedAvoidedScheduleWindow].self, from: data) else {
+            return []
+        }
+        return stored.compactMap { item in
+            guard item.startMinutes >= 0,
+                  item.endMinutes <= 24 * 60,
+                  item.startMinutes < item.endMinutes else { return nil }
+            return AvoidedScheduleWindow(startMinutes: item.startMinutes, endMinutes: item.endMinutes)
+        }
+    }
+
+    func saveAvoidedTimeWindows(_ windows: [AvoidedScheduleWindow]) {
+        let stored = windows.compactMap { window -> PersistedAvoidedScheduleWindow? in
+            guard window.start < window.end else { return nil }
+            return PersistedAvoidedScheduleWindow(startMinutes: window.startMinutes,
+                                                  endMinutes: window.endMinutes)
+        }
+        guard let data = try? JSONEncoder().encode(stored) else { return }
+        defaults.set(data, forKey: avoidedWindowsStorageKey)
+    }
+
     private func loadCategories() -> [TaskCategory] {
         guard
             let data = defaults.data(forKey: categoriesKey),
@@ -1243,28 +1402,25 @@ final class ScheduleViewModel: ObservableObject {
         return decoded
     }
 
-    private func loadTasks() -> [TaskItem] {
-        guard
-            let data = defaults.data(forKey: tasksKey),
-            var decoded = try? JSONDecoder().decode([TaskItem].self, from: data)
-        else {
-            return []
-        }
-        decoded = decoded.filter { $0.duration > 0 }
-        decoded = decoded.map { task in
+    private func normalizeLoadedTasks(_ tasks: [TaskItem]) -> [TaskItem] {
+        tasks.filter { $0.duration > 0 }.map { task in
             var mutable = task
             if mutable.startIndex + mutable.duration > totalBlocks {
                 mutable.startIndex = max(0, totalBlocks - mutable.duration)
             }
             return mutable
-        }
-        decoded.sort { $0.startIndex < $1.startIndex }
-        return decoded
+        }.sorted { $0.startIndex < $1.startIndex }
     }
 
     private func saveTasks() {
-        guard let data = try? JSONEncoder().encode(tasks) else { return }
-        defaults.set(data, forKey: tasksKey)
+        let encoder = JSONEncoder()
+        let data: Data?
+        if let pause {
+            data = try? encoder.encode(PausedSchedule(tasks: tasks, pause: pause))
+        } else {
+            data = try? encoder.encode(tasks)
+        }
+        if let data { defaults.set(data, forKey: tasksKey) }
     }
 
     private func saveCategories() {
